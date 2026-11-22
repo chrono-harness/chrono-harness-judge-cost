@@ -87,7 +87,7 @@ pub fn produce(
     candidate: &Registrations,
     impact: &Impact,
 ) -> Result<Value, String> {
-    if !verified_cost::identifiers::equal_text(&impact.schema, IMPACT_SCHEMA) {
+    if impact.schema != IMPACT_SCHEMA {
         return Err("E_IMPACT: unsupported cost input schema".into());
     }
     let mut subjects: BTreeSet<String> = impact

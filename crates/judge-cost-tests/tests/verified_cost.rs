@@ -4,6 +4,7 @@
 mod policy;
 #[cfg(not(verus_keep_ghost))]
 use chrono_harness::verus;
+use vstd::contrib::exec_spec::ExecSpecEq;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -20,7 +21,7 @@ fn expect(actual: bool)
 fn expect_name(actual: &str, expected: &str)
     requires actual@ == expected@,
 {
-    let equal = policy::identifiers::equal_text(actual, expected);
+    let equal = <&str>::exec_eq(actual, expected);
     expect(equal);
 }
 

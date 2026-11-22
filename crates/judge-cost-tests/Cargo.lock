@@ -92,6 +92,7 @@ dependencies = [
  "chrono-harness",
  "serde",
  "serde_json",
+ "verus_builtin_macros",
 ]
 
 [[package]]
@@ -102,6 +103,7 @@ dependencies = [
  "chrono-judge-cost",
  "serde",
  "serde_json",
+ "verus_builtin_macros",
  "vstd",
 ]
 

@@ -1,9 +1,8 @@
 //! Explicit declared costs for the already-selected FILEMAP impact. No cost inference.
-use chrono_harness::{
-    facts,
-    wire::{Finding, Request, Response, Status},
-};
-use chrono_judge_registration::Registrations;
+use chrono_harness::wire::{Finding, Request, Response, Status};
+use registry::CostFile;
+pub use registry::CostRegistry;
+mod registry;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
@@ -16,46 +15,46 @@ pub const COST_SCHEMA: &str = "chrono-costs/v1";
 fn escape(s: &str) -> String {
     s.replace('~', "~0").replace('/', "~1")
 }
-fn reference(r: &Registrations, id: &str, member: &str, pointer: String) -> Result<Value, String> {
-    let model = r.filemap()["cost_models"]
+fn reference(r: &CostRegistry, id: &str, member: &str, pointer: String) -> Result<Value, String> {
+    let model = r
+        .filemap
+        .cost_models
         .get(id)
         .ok_or_else(|| format!("E_COST_REFERENCE: missing cost model {id} for {member}"))?;
-    let registry = &r.config()["registries"]["filemap"];
+    let registry = &r.path;
     Ok(json!({"reference":id,"member":member,"value":model,
         "source":{"registry":registry,"pointer":format!("/cost_models/{}",escape(id))},
         "declaration":{"registry":registry,"pointer":pointer}}))
 }
-fn file_cost(r: &Registrations, index: usize, file: &Value) -> Result<Value, String> {
+fn file_cost(r: &CostRegistry, index: usize, file: &CostFile) -> Result<Value, String> {
     reference(
         r,
-        file["cost"].as_str().unwrap(),
-        &format!("file:{}", file["path"].as_str().unwrap()),
+        &file.cost,
+        &format!("file:{}", file.path),
         format!("/files/{index}/cost"),
     )
 }
-fn entry(r: &Registrations, node: &str) -> Result<Value, String> {
-    let files = r.filemap()["files"].as_array().unwrap();
+fn entry(r: &CostRegistry, node: &str) -> Result<Value, String> {
+    let files = &r.filemap.files;
     if let Some(path) = node.strip_prefix("file:") {
-        let Some((i, f)) = files.iter().enumerate().find(|(_, f)| f["path"] == path) else {
+        let Some((i, f)) = files.iter().enumerate().find(|(_, f)| f.path == path) else {
             return Ok(Value::Null);
         };
         return Ok(json!({"kind":"file","costs":[file_cost(r,i,f)?]}));
     }
     if let Some(id) = node.strip_prefix("test:") {
-        if !r.node_data().contains_key(node) {
+        if !r.nodes.contains(node) {
             return Ok(Value::Null);
         }
-        let (i, row) = r.filemap()["test_costs"]
-            .as_array()
-            .unwrap()
+        let (i, row) = r
+            .filemap
+            .test_costs
             .iter()
             .enumerate()
-            .find(|(_, row)| row["test"] == id)
+            .find(|(_, row)| row.test == id)
             .ok_or_else(|| format!("E_COST_REFERENCE: missing test cost {node}"))?;
-        return Ok(
-            json!({"kind":"test","costs":[reference(r,row["cost"].as_str().unwrap(),node,
-            format!("/test_costs/{i}/cost"))?]}),
-        );
+        return Ok(json!({"kind":"test","costs":[reference(r,&row.cost,node,
+            format!("/test_costs/{i}/cost"))?]}));
     }
     let (kind, id) = if let Some(id) = node.strip_prefix("project:") {
         ("project", id)
@@ -66,16 +65,16 @@ fn entry(r: &Registrations, node: &str) -> Result<Value, String> {
     };
     // The candidate decoder retains obsolete definitions in the historical view.
     // Their declared member costs remain meaningful without executing old code.
-    if !r.node_data().contains_key(node) {
+    if !r.nodes.contains(node) {
         return Ok(Value::Null);
     }
     // Ownership is declared data. Keep each member and its source; costs are not additive by default.
     let mut members: Vec<_> = files
         .iter()
         .enumerate()
-        .filter(|(_, f)| f["owner"] == id)
+        .filter(|(_, f)| f.owner == id)
         .collect();
-    members.sort_by_key(|(_, f)| f["path"].as_str().unwrap());
+    members.sort_by_key(|(_, f)| f.path.as_str());
     let costs = members
         .into_iter()
         .map(|(i, f)| file_cost(r, i, f))
@@ -85,8 +84,8 @@ fn entry(r: &Registrations, node: &str) -> Result<Value, String> {
 
 /// Declaration-only report over FILEMAP's existing impact. No operations or resource measurement.
 pub fn produce(
-    base: &Registrations,
-    candidate: &Registrations,
+    base: &CostRegistry,
+    candidate: &CostRegistry,
     impact: &CostImpact,
 ) -> Result<Value, String> {
     if impact.schema != "chrono-filemap-impact/v6" {
@@ -167,14 +166,7 @@ pub fn produce(
 
 pub fn judge(req: &Request) -> Response {
     let mut response = req.response(Status::Pass);
-    let reader = facts::Reader::for_request(req);
-    let result = reader
-        .as_ref()
-        .map_err(Clone::clone)
-        .and_then(|reader| evaluate(req, reader));
-    if let Ok(reader) = &reader {
-        reader.record(&mut response);
-    }
+    let result = evaluate(req, &mut response);
     match result {
         Ok(costs) => {
             if !costs["unknown"].as_array().unwrap().is_empty() {
@@ -217,18 +209,24 @@ pub fn judge(req: &Request) -> Response {
     }
     response
 }
-fn evaluate(req: &Request, reader: &facts::Reader) -> Result<Value, String> {
+fn evaluate(req: &Request, response: &mut Response) -> Result<Value, String> {
     req.validate()?;
-    let (base, candidate, _) = chrono_judge_registration::views_with_reader(req, reader)?;
-    let impact = impact::decode(
-        &req.impact,
-        &candidate.config()["protocol"],
-        &req.observations["environment"]["effective"],
-        |spec, input| {
-            let result = chrono_harness::run_process(&req.candidate.root, spec, input)?;
-            Ok((result.exit_code, result.stdout_bytes, result.stderr_bytes))
-        },
-    )?;
+    let config = chrono_harness::load_selected_config(&req.candidate.root, &req.config_path)?;
+    let protocol = &config["protocol"];
+    let environment = &req.observations["environment"]["effective"];
+    let run = |command: &chrono_harness::CommandSpec, input: &[u8]| {
+        let result = chrono_harness::run_process(&req.candidate.root, command, input)?;
+        Ok((result.exit_code, result.stdout_bytes, result.stderr_bytes))
+    };
+    let reply = registry::query(&req.canonical()?, protocol, environment, run)?;
+    if reply.request_id != req.request_id {
+        return Err("E_PROTOCOL: registration query identity".into());
+    }
+    if let Some(facts) = reply.git_facts {
+        response.outputs.insert("git_facts".into(), facts);
+    }
+    let (base, candidate) = reply.views.into_result()?;
+    let impact = impact::decode(&req.impact, protocol, environment, run)?;
     let sources: Vec<_> = req
         .prior_results
         .iter()

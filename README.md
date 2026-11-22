@@ -6,4 +6,4 @@
 
 [固定来源](https://github.com/ChronoAIProject/chrono-harness/tree/5f6892dfa2f73675a84e4ebdc3b06eb83b824d6e/crates/judge-cost)
 
-成本判官使用 FILEMAP 已校验的公开输出，并保留输入与所绑定 DELTA 的一致性检查、已退役测试以及有未知成本时的报告行为。 运行时在宿主 PATH 中安装本仓 mise 清单固定的 chrono-judge-filemap v0.1.0-alpha.1。判官按已登记的超时、输出上限和环境调用 `impact-summary`。
+成本判官使用 FILEMAP 已校验的公开输出，并保留输入与所绑定 DELTA 的一致性检查、已退役测试以及有未知成本时的报告行为。运行时在宿主 PATH 中安装本仓 mise 清单固定的 chrono-judge-filemap 与 chrono-judge-registration。判官按已登记的超时、输出上限和环境调用 `impact-summary`。它把同一份封存请求交给 registration 的 `filemap-views`，读取变更前后各节点的声明成本，并将绑定 Git 读取产生的观察记录放入判官响应。

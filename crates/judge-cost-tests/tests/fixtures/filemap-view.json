@@ -1,0 +1,141 @@
+{
+  "filemap": {
+    "cost_models": {
+      "unknown": {
+        "basis": "unmeasured fixture",
+        "cpu_ms": null,
+        "io_bytes": null,
+        "peak_rss_bytes": null,
+        "wall_ms": null
+      }
+    },
+    "files": [
+      {
+        "cost": "unknown",
+        "edges": [
+          {
+            "kind": "compile",
+            "to": "project:p"
+          }
+        ],
+        "owner": "host",
+        "path": "src.bin",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": "doc.txt",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": ".chrono-harness/config.json",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": ".chrono-harness/FILEMAP.json",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": ".chrono-harness/projects.json",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": ".chrono-harness/judges.json",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": ".chrono-harness/workflow.json",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": ".gitignore",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": "p/Cargo.toml",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": "p/Cargo.lock",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": "t/Cargo.toml",
+        "surface": "product"
+      },
+      {
+        "cost": "unknown",
+        "edges": [],
+        "owner": "host",
+        "path": "t/Cargo.lock",
+        "surface": "product"
+      }
+    ],
+    "project_edges": [
+      {
+        "from": "project:p",
+        "kind": "test-execution",
+        "to": "test:t"
+      }
+    ],
+    "schema_version": 1,
+    "status": "active",
+    "test_costs": [
+      {
+        "cost": "unknown",
+        "test": "t"
+      }
+    ]
+  },
+  "nodes": [
+    "environment:PATH",
+    "file:.chrono-harness/FILEMAP.json",
+    "file:.chrono-harness/config.json",
+    "file:.chrono-harness/judges.json",
+    "file:.chrono-harness/projects.json",
+    "file:.chrono-harness/workflow.json",
+    "file:.gitignore",
+    "file:doc.txt",
+    "file:p/Cargo.lock",
+    "file:p/Cargo.toml",
+    "file:src.bin",
+    "file:t/Cargo.lock",
+    "file:t/Cargo.toml",
+    "judge:filemap",
+    "judge:registration",
+    "project:p",
+    "project:t",
+    "test:t",
+    "tool:sh"
+  ],
+  "path": ".chrono-harness/FILEMAP.json"
+}

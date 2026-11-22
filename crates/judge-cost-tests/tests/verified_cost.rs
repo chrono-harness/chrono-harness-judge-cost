@@ -3,7 +3,7 @@
 #[path = "../../judge-cost/src/verified_cost.rs"]
 mod policy;
 #[cfg(not(verus_keep_ghost))]
-use chrono_harness::verus;
+use verus_builtin_macros::verus;
 use vstd::contrib::exec_spec::ExecSpecEq;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;

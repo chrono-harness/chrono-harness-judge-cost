@@ -1,0 +1,66 @@
+{
+  "changed_model": {
+    "delta": [{"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": "src.bin"}],
+    "reached": ["file:.chrono-harness/FILEMAP.json", "file:.chrono-harness/config.json", "file:.chrono-harness/judges.json", "file:.chrono-harness/projects.json", "file:.chrono-harness/workflow.json", "file:.gitignore", "file:doc.txt", "file:p/Cargo.lock", "file:p/Cargo.toml", "file:src.bin", "file:t/Cargo.lock", "file:t/Cargo.toml", "project:p", "test:t"],
+    "required_tests": ["test:t"],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": ["test:t"]
+  },
+  "cost_declaration": {
+    "delta": [{"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": ".chrono-harness/FILEMAP.json"}],
+    "reached": ["file:.chrono-harness/FILEMAP.json", "file:doc.txt"],
+    "required_tests": [],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": []
+  },
+  "docs_only": {
+    "delta": [{"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": "doc.txt"}],
+    "reached": ["file:doc.txt"],
+    "required_tests": [],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": []
+  },
+  "empty": {
+    "delta": [],
+    "reached": [],
+    "required_tests": [],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": []
+  },
+  "retired_test": {
+    "delta": [{"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": "src.bin"}],
+    "reached": ["file:src.bin", "project:p", "project:t", "test:t"],
+    "required_tests": ["test:t"],
+    "retired_tests": ["test:t"],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": []
+  },
+  "shared_test": {
+    "delta": [{"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": "src.bin"}, {"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": "doc.txt"}],
+    "reached": ["file:doc.txt", "file:src.bin", "project:p", "test:t"],
+    "required_tests": ["test:t"],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": ["test:t"]
+  },
+  "source_change": {
+    "delta": [{"kind": "M", "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "new_mode": "100644", "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old_mode": "100644", "path": "src.bin"}],
+    "reached": ["file:src.bin", "project:p", "test:t"],
+    "required_tests": ["test:t"],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": ["test:t"]
+  },
+  "test_groups": {
+    "delta": [],
+    "reached": ["project:p", "project:t", "test:opaque", "test:t"],
+    "required_tests": ["test:opaque", "test:t"],
+    "retired_tests": [],
+    "schema": "chrono-filemap-impact/v6",
+    "tests": ["test:opaque", "test:t"]
+  }
+}

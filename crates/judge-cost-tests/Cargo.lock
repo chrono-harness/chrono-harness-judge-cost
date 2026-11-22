@@ -90,8 +90,8 @@ name = "chrono-judge-cost"
 version = "0.1.0"
 dependencies = [
  "chrono-harness",
- "chrono-judge-filemap",
  "chrono-judge-registration",
+ "serde",
  "serde_json",
 ]
 
@@ -104,6 +104,7 @@ dependencies = [
  "chrono-judge-filemap",
  "chrono-judge-registration",
  "chrono-registration-fixture",
+ "serde",
  "serde_json",
  "vstd",
 ]

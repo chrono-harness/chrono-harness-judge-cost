@@ -1,7 +1,22 @@
 mod support;
-use chrono_judge_cost::produce;
+use chrono_judge_cost::{CostImpact, produce};
 use serde_json::{Value, json};
 use support::*;
+
+fn declared_cost_input(impact: chrono_judge_filemap::Impact) -> CostImpact {
+    CostImpact {
+        schema: impact.schema,
+        reached: impact.closure.reached.into_keys().collect(),
+        delta: impact.delta,
+        tests: impact.tests,
+        retired_tests: impact.retired_tests,
+        required_tests: impact
+            .required_tests
+            .into_iter()
+            .map(|test| test.node)
+            .collect(),
+    }
+}
 
 fn report(a: &Values, b: &Values, paths: &[&str]) -> Result<Value, String> {
     let a = load(a);
@@ -9,7 +24,7 @@ fn report(a: &Values, b: &Values, paths: &[&str]) -> Result<Value, String> {
     let delta = paths.iter().map(|p| delta(p)).collect::<Vec<_>>();
     let (impact, findings) = chrono_judge_filemap::produce(&a, &b, &delta);
     assert!(findings.is_empty(), "{findings:?}");
-    produce(&a, &b, &impact)
+    produce(&a, &b, &declared_cost_input(impact))
 }
 fn known() -> Values {
     let mut v = values();
@@ -160,7 +175,7 @@ fn dangling_cost_reference_is_an_error_not_an_unknown_value() {
     let b = load(&b);
     let (impact, _) = chrono_judge_filemap::produce(&a, &b, &[delta("src.bin")]);
     assert!(
-        produce(&a, &b, &impact)
+        produce(&a, &b, &declared_cost_input(impact))
             .unwrap_err()
             .contains("E_COST_REFERENCE")
     );

@@ -12,6 +12,7 @@ chrono-registration-fixture = { git = "https://github.com/chrono-harness/chrono-
 chrono-judge-registration = { git = "https://github.com/chrono-harness/chrono-harness-judge-registration.git", rev = "76530cce04ad04ebda2f71a16a8a51f930c2daa8" }
 chrono-judge-filemap = { git = "https://github.com/chrono-harness/chrono-harness-judge-filemap.git", rev = "545c03a0df4259921d927e3e9fffd9fa2b65c68d" }
 chrono-judge-cost = { path = "../judge-cost" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [[test]]
@@ -21,3 +22,7 @@ path = "tests/costs.rs"
 [[test]]
 name = "verified_cost"
 path = "tests/verified_cost.rs"
+
+[[test]]
+name = "impact_summary"
+path = "tests/impact_summary.rs"

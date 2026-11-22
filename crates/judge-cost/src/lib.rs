@@ -3,12 +3,14 @@ use chrono_harness::{
     facts,
     wire::{Finding, Request, Response, Status},
 };
-use chrono_judge_filemap::{IMPACT_SCHEMA, Impact};
 use chrono_judge_registration::Registrations;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
 mod verified_cost;
+
+mod impact;
+pub use impact::CostImpact;
 
 pub const COST_SCHEMA: &str = "chrono-costs/v1";
 fn escape(s: &str) -> String {
@@ -85,9 +87,9 @@ fn entry(r: &Registrations, node: &str) -> Result<Value, String> {
 pub fn produce(
     base: &Registrations,
     candidate: &Registrations,
-    impact: &Impact,
+    impact: &CostImpact,
 ) -> Result<Value, String> {
-    if impact.schema != IMPACT_SCHEMA {
+    if impact.schema != "chrono-filemap-impact/v6" {
         return Err("E_IMPACT: unsupported cost input schema".into());
     }
     let mut subjects: BTreeSet<String> = impact
@@ -97,15 +99,14 @@ pub fn produce(
         .collect();
     subjects.extend(
         impact
-            .closure
             .reached
-            .keys()
+            .iter()
             .filter(|n| {
                 n.starts_with("file:") || n.starts_with("project:") || n.starts_with("script:")
             })
             .cloned(),
     );
-    subjects.extend(impact.required_tests.iter().map(|t| t.node.clone()));
+    subjects.extend(impact.required_tests.iter().cloned());
     let mut before = Map::new();
     let mut after = Map::new();
     let mut unknown = vec![];
@@ -219,8 +220,15 @@ pub fn judge(req: &Request) -> Response {
 fn evaluate(req: &Request, reader: &facts::Reader) -> Result<Value, String> {
     req.validate()?;
     let (base, candidate, _) = chrono_judge_registration::views_with_reader(req, reader)?;
-    let impact: Impact =
-        serde_json::from_value(req.impact.clone()).map_err(|e| format!("E_IMPACT: {e}"))?;
+    let impact = impact::decode(
+        &req.impact,
+        &candidate.config()["protocol"],
+        &req.observations["environment"]["effective"],
+        |spec, input| {
+            let result = chrono_harness::run_process(&req.candidate.root, spec, input)?;
+            Ok((result.exit_code, result.stdout_bytes, result.stderr_bytes))
+        },
+    )?;
     let sources: Vec<_> = req
         .prior_results
         .iter()

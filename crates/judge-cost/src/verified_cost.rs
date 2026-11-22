@@ -5,11 +5,6 @@ use chrono_harness::verus;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
-#[cfg(verus_keep_ghost)]
-pub extern crate chrono_identifiers as identifiers;
-#[cfg(not(verus_keep_ghost))]
-pub use chrono_harness::verified_identifiers as identifiers;
-
 verus! {
 
 /// A cost declaration is unknown when any of its four coordinates is absent.

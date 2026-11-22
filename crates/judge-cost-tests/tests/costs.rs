@@ -1,16 +1,24 @@
 use chrono_judge_cost::{CostImpact, produce};
-use chrono_registration_fixture::*;
 use serde_json::{Value, json};
 
+const FM: &str = ".chrono-harness/FILEMAP.json";
+fn values() -> Value {
+    serde_json::from_str(include_str!("fixtures/filemap-view.json")).unwrap()
+}
+
 // The FILEMAP v0.1.0-alpha.1 impact-summary output for these endpoint fixtures.
-fn report(a: &Values, b: &Values, scenario: &str) -> Result<Value, String> {
+fn report(a: &Value, b: &Value, scenario: &str) -> Result<Value, String> {
     let samples: std::collections::BTreeMap<String, CostImpact> =
         serde_json::from_str(include_str!("fixtures/impact-summaries.json")).unwrap();
-    produce(&load(a), &load(b), &samples[scenario])
+    produce(
+        &serde_json::from_value(a.clone()).unwrap(),
+        &serde_json::from_value(b.clone()).unwrap(),
+        &samples[scenario],
+    )
 }
-fn known() -> Values {
+fn known() -> Value {
     let mut v = values();
-    let fm = v.get_mut(FM).unwrap();
+    let fm = v.get_mut("filemap").unwrap();
     fm["cost_models"]["known"] = json!({"cpu_ms":10,"wall_ms":20,"peak_rss_bytes":30,"io_bytes":40,"basis":"declared estimate from fixture sample"});
     for f in fm["files"].as_array_mut().unwrap() {
         f["cost"] = "known".into();
@@ -29,7 +37,7 @@ fn known() -> Values {
 fn distinct_endpoints_preserve_four_coordinates_basis_and_sources() {
     let a = known();
     let mut b = a.clone();
-    b.get_mut(FM).unwrap()["cost_models"]["known"]["cpu_ms"] = 12.into();
+    b.get_mut("filemap").unwrap()["cost_models"]["known"]["cpu_ms"] = 12.into();
     let r = report(&a, &b, "changed_model").unwrap();
     assert_eq!(r["schema"], "chrono-costs/v1");
     for (endpoint, cpu) in [("declared_before", 10), ("declared_after", 12)] {
@@ -61,7 +69,7 @@ fn distinct_endpoints_preserve_four_coordinates_basis_and_sources() {
 #[test]
 fn unknown_coordinates_remain_null_and_known_coordinates_survive() {
     let mut a = known();
-    a.get_mut(FM).unwrap()["cost_models"]["known"]["cpu_ms"] = Value::Null;
+    a.get_mut("filemap").unwrap()["cost_models"]["known"]["cpu_ms"] = Value::Null;
     let r = report(&a, &a, "source_change").unwrap();
     let cost = &r["declared_after"]["test:t"]["costs"][0]["value"];
     assert!(cost["cpu_ms"].is_null());
@@ -81,16 +89,15 @@ fn unknown_coordinates_remain_null_and_known_coordinates_survive() {
 fn deleted_file_and_required_removed_test_keep_old_cost_references() {
     let a = known();
     let mut b = a.clone();
-    b.get_mut(FM).unwrap()["files"]
+    b.get_mut("filemap").unwrap()["files"]
         .as_array_mut()
         .unwrap()
         .retain(|f| f["path"] != "src.bin");
-    b.get_mut(FM).unwrap()["project_edges"] = json!([]);
-    b.get_mut(FM).unwrap()["test_costs"] = json!([]);
-    b.get_mut(PROJECTS).unwrap()["projects"]
+    b.get_mut("filemap").unwrap()["test_costs"] = json!([]);
+    b["nodes"]
         .as_array_mut()
         .unwrap()
-        .retain(|p| p["id"] != "t");
+        .retain(|node| node != "test:t" && node != "project:t");
     let r = report(&a, &b, "retired_test").unwrap();
     assert_eq!(
         r["declared_before"]["file:src.bin"]["costs"][0]["reference"],
@@ -125,8 +132,7 @@ fn disconnected_docs_and_empty_delta_do_not_add_other_nodes() {
 
 #[test]
 fn shared_test_has_one_identity_and_equal_cost_models_do_not_merge_members() {
-    let mut a = known();
-    a.get_mut(FM).unwrap()["files"][1]["edges"] = json!([{"kind":"test-execution","to":"test:t"}]);
+    let a = known();
     let r = report(&a, &a, "shared_test").unwrap();
     assert_eq!(r["affected_tests"], json!(["test:t"]));
     assert_eq!(
@@ -149,7 +155,7 @@ fn shared_test_has_one_identity_and_equal_cost_models_do_not_merge_members() {
 fn dangling_cost_reference_is_an_error_not_an_unknown_value() {
     let a = known();
     let mut b = a.clone();
-    b.get_mut(FM).unwrap()["cost_models"]
+    b.get_mut("filemap").unwrap()["cost_models"]
         .as_object_mut()
         .unwrap()
         .remove("known");
@@ -164,8 +170,8 @@ fn dangling_cost_reference_is_an_error_not_an_unknown_value() {
 fn declaration_only_cost_change_reports_the_affected_file() {
     let a = known();
     let mut b = a.clone();
-    b.get_mut(FM).unwrap()["cost_models"]["docs"] = json!({"cpu_ms":2,"wall_ms":3,"peak_rss_bytes":4,"io_bytes":5,"basis":"updated documentation estimate"});
-    b.get_mut(FM).unwrap()["files"][1]["cost"] = "docs".into();
+    b.get_mut("filemap").unwrap()["cost_models"]["docs"] = json!({"cpu_ms":2,"wall_ms":3,"peak_rss_bytes":4,"io_bytes":5,"basis":"updated documentation estimate"});
+    b.get_mut("filemap").unwrap()["files"][1]["cost"] = "docs".into();
     let r = report(&a, &b, "cost_declaration").unwrap();
     assert_eq!(
         r["declared_before"]["file:doc.txt"]["costs"][0]["value"]["cpu_ms"],
@@ -199,15 +205,11 @@ fn project_without_declared_member_costs_stays_unknown() {
 fn grouped_test_costs_keep_original_and_new_endpoint_identities() {
     let old = known();
     let mut new = old.clone();
-    new.get_mut(PROJECTS).unwrap()["projects"][1]["actions"]["second"] =
-        json!({"operation":"execute.second","tool":"sh","argv":["-c","exit 0"]});
-    new.get_mut(PROJECTS).unwrap()["projects"][1]["test_groups"] =
-        json!({"t":"execute","opaque":"second"});
-    new.get_mut(FM).unwrap()["project_edges"]
+    new["nodes"]
         .as_array_mut()
         .unwrap()
-        .push(edge("project:p", "test-execution", "test:opaque"));
-    new.get_mut(FM).unwrap()["test_costs"]
+        .push(json!("test:opaque"));
+    new.get_mut("filemap").unwrap()["test_costs"]
         .as_array_mut()
         .unwrap()
         .push(json!({"test":"opaque","cost":"known"}));

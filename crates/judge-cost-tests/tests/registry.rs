@@ -1,5 +1,7 @@
 #[path = "../../judge-cost/src/query.rs"]
 mod query;
+#[path = "../../judge-cost/src/registration_query.rs"]
+mod registration_query;
 #[allow(dead_code)]
 #[path = "../../judge-cost/src/registry.rs"]
 mod registry;
@@ -11,7 +13,7 @@ fn forwards_sealed_input_and_recovers_views_or_original_git_failure() {
     let protocol = json!({"timeout_seconds":5,"stdout_limit_bytes":65536});
     let env = json!({"PATH":"/installed"});
     let view: Value = serde_json::from_str(include_str!("fixtures/filemap-view.json")).unwrap();
-    let result = registry::query(raw, &protocol, &env, |cmd, input| {
+    let result = registration_query::query(raw, &protocol, &env, |cmd, input| {
         assert_eq!(cmd.argv, ["chrono-judge-registration", "filemap-views"]);
         assert_eq!(cmd.env["PATH"], "/installed");
         assert_eq!((cmd.timeout_seconds, cmd.output_limit_bytes), (5, 65536));
@@ -35,7 +37,7 @@ fn forwards_sealed_input_and_recovers_views_or_original_git_failure() {
         "error": "registration view binding mismatch",
         "git_facts": original,
     });
-    let rejected = registry::query(raw, &protocol, &env, |_, _| {
+    let rejected = registration_query::query(raw, &protocol, &env, |_, _| {
         Ok((0, serde_json::to_vec(&failed).unwrap(), vec![]))
     })
     .unwrap();
@@ -53,7 +55,7 @@ fn forwards_sealed_input_and_recovers_views_or_original_git_failure() {
         ),
     ] {
         assert!(
-            registry::query(raw, &protocol, &env, |_, _| result)
+            registration_query::query(raw, &protocol, &env, |_, _| result)
                 .err()
                 .unwrap()
                 .starts_with(expected)

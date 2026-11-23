@@ -1,5 +1,16 @@
-use chrono_judge_cost::{CostImpact, produce};
+use chrono_judge_cost::{ChangedFile, FilemapImpact, produce};
 use serde_json::{Value, json};
+
+#[derive(serde::Deserialize)]
+struct ChangedPath {
+    path: String,
+}
+
+impl ChangedFile for ChangedPath {
+    fn path(&self) -> &str {
+        &self.path
+    }
+}
 
 const FM: &str = ".chrono-harness/FILEMAP.json";
 fn values() -> Value {
@@ -8,7 +19,7 @@ fn values() -> Value {
 
 // The FILEMAP v0.1.0-alpha.1 impact-summary output for these endpoint fixtures.
 fn report(a: &Value, b: &Value, scenario: &str) -> Result<Value, String> {
-    let samples: std::collections::BTreeMap<String, CostImpact> =
+    let samples: std::collections::BTreeMap<String, FilemapImpact<ChangedPath>> =
         serde_json::from_str(include_str!("fixtures/impact-summaries.json")).unwrap();
     produce(
         &serde_json::from_value(a.clone()).unwrap(),

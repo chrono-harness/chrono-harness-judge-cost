@@ -39,6 +39,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78
+        with:
+          version: 2026.11.12
+          cache: false
+          install_args: http:chrono-harness
       - name: Build and exercise the release binary
         shell: bash
         env:
@@ -53,6 +58,11 @@ jobs:
           "$binary" --protocol chrono-judge/v1 <<< '{}' 2>"$RUNNER_TEMP/cost-error" || code=$?
           test "$code" = 2
           grep -F 'E_PROTOCOL:' "$RUNNER_TEMP/cost-error"
+          samples=crates/judge-cost-tests/tests/fixtures
+          jq -n --slurpfile view "$samples/filemap-view.json" --slurpfile impacts "$samples/impact-summaries.json" \
+            '{base:$view[0],candidate:$view[0],impact:$impacts[0].changed_model,binding:{base:"base",candidate:"candidate",candidate_tree:"tree",registry_digest:"registry",context_digest:"context"}}' \
+            | "$binary" report-v1 \
+            | jq -e '.status == "warn" and .findings[0].code == "W_COST_UNKNOWN" and .outputs.costs.binding.candidate_tree == "tree"'
           mkdir "$RUNNER_TEMP/dist"
           cp "$CARGO_TARGET_DIR/release/chrono-judge-cost" "$RUNNER_TEMP/dist/chrono-judge-cost-$PLATFORM"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

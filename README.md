@@ -6,6 +6,6 @@
 
 [固定来源](https://github.com/ChronoAIProject/chrono-harness/tree/5f6892dfa2f73675a84e4ebdc3b06eb83b824d6e/crates/judge-cost)
 
-成本判官使用 FILEMAP 已校验的公开输出，并保留输入与所绑定 DELTA 的一致性检查、已退役测试以及有未知成本时的报告行为。运行时在宿主 PATH 中安装本仓 mise 清单固定的 chrono-judge-filemap 与 chrono-judge-registration。判官按已登记的超时、输出上限和环境调用 `impact-summary`。它把同一份封存请求交给 registration 的 `filemap-views`，读取变更前后各节点的声明成本，并将绑定 Git 读取产生的观察记录放入判官响应。
+运行 `chrono-judge-cost --protocol chrono-judge/v1` 时，程序调用已安装的 `chrono-harness judge-pipeline`。runner 核对封存请求、读取宿主限额、记录日志，并调用 `chrono-judge-filemap cost-inputs-v1` 取得两端的已解释登记、完整变更范围和 Git 观察。FILEMAP 使用已安装的 registration 命令。runner 随后调用同一成本程序的 `report-v1` 生成判定与成本报告。
 
-专属测试直接使用本仓的成本报告库。报告按输入中的变更文件路径选择成本条目。默认构建启用 `judge`，由判官入口核对封存请求、完整 DELTA 与 FILEMAP 原始输出，再调用同一套报告计算。`check.sh` 分别构建命令、运行专属测试和 Verus 证明。
+`report-v1` 直接从 stdin 读取一份由生产者准备的 JSON，包含 `base`、`candidate`、`impact` 和 `binding`。它向 stdout 输出状态、findings 和 `outputs.costs`。独立编译成本程序只需要本仓源码和 crates.io 依赖。

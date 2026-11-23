@@ -8,7 +8,7 @@ autotests = false
 [dev-dependencies]
 verus_builtin_macros = "=0.0.0-2026-04-20-1748"
 vstd = "=0.0.0-2026-04-20-1748"
-chrono-judge-cost = { path = "../judge-cost", default-features = false }
+chrono-judge-cost = { path = "../judge-cost" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -19,11 +19,3 @@ path = "tests/costs.rs"
 [[test]]
 name = "verified_cost"
 path = "tests/verified_cost.rs"
-
-[[test]]
-name = "impact_summary"
-path = "tests/impact_summary.rs"
-
-[[test]]
-name = "registry"
-path = "tests/registry.rs"

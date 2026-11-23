@@ -239,3 +239,30 @@ fn grouped_test_costs_keep_original_and_new_endpoint_identities() {
         "test:t"
     );
 }
+
+#[test]
+fn report_command_publishes_the_warning_and_exact_supplied_binding() {
+    let binding = json!({"base":"base","candidate":"candidate","candidate_tree":"tree","registry_digest":"registry","context_digest":"context"});
+    let summaries: Value =
+        serde_json::from_str(include_str!("fixtures/impact-summaries.json")).unwrap();
+    let input = json!({"base":values(),"candidate":values(),"impact":summaries["changed_model"],"binding":binding});
+    let mut output = Vec::new();
+    chrono_judge_cost::report::write_report(&serde_json::to_vec(&input).unwrap()[..], &mut output)
+        .unwrap();
+    let decision: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(decision["status"], "warn");
+    assert_eq!(decision["findings"][0]["code"], "W_COST_UNKNOWN");
+    assert_eq!(decision["outputs"]["costs"]["binding"], binding);
+    let mut malformed = input;
+    malformed["impact"]["schema"] = json!("unsupported");
+    output.clear();
+    assert!(
+        chrono_judge_cost::report::write_report(
+            &serde_json::to_vec(&malformed).unwrap()[..],
+            &mut output
+        )
+        .unwrap_err()
+        .contains("unsupported cost input schema")
+    );
+    assert!(output.is_empty());
+}

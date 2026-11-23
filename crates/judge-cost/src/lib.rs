@@ -1,22 +1,12 @@
 //! Explicit declared costs for the already-selected FILEMAP impact. No cost inference.
-#[cfg(feature = "judge")]
-mod judge;
-#[cfg(feature = "judge")]
-pub use judge::{CostImpact, judge};
 use registry::CostFile;
 pub use registry::CostRegistry;
-#[cfg(feature = "judge")]
-mod registration_query;
 mod registry;
+pub mod report;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
 mod verified_cost;
-
-#[cfg(feature = "judge")]
-mod impact;
-#[cfg(feature = "judge")]
-mod query;
 
 /// The public FILEMAP impact-summary fields used by the declared-cost report.
 #[derive(serde::Deserialize)]

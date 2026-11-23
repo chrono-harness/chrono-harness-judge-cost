@@ -1,3 +1,5 @@
+#[path = "../../judge-cost/src/query.rs"]
+mod query;
 #[allow(dead_code)]
 #[path = "../../judge-cost/src/registry.rs"]
 mod registry;
@@ -10,8 +12,7 @@ fn forwards_sealed_input_and_recovers_views_or_original_git_failure() {
     let env = json!({"PATH":"/installed"});
     let view: Value = serde_json::from_str(include_str!("fixtures/filemap-view.json")).unwrap();
     let result = registry::query(raw, &protocol, &env, |cmd, input| {
-        assert_eq!(cmd.program, "chrono-judge-registration");
-        assert_eq!(cmd.args, ["filemap-views"]);
+        assert_eq!(cmd.argv, ["chrono-judge-registration", "filemap-views"]);
         assert_eq!(cmd.env["PATH"], "/installed");
         assert_eq!((cmd.timeout_seconds, cmd.output_limit_bytes), (5, 65536));
         assert_eq!(input, raw);

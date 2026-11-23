@@ -8,7 +8,6 @@ autotests = false
 [dev-dependencies]
 verus_builtin_macros = "=0.0.0-2026-04-20-1748"
 vstd = "=0.0.0-2026-04-20-1748"
-chrono-harness = { git = "https://github.com/chrono-harness/chrono-harness-runner.git", rev = "a1cff08f74d996d618372f20adc203d1b5904d50" }
 chrono-judge-cost = { path = "../judge-cost" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1,6 +1,9 @@
 #[path = "../../judge-cost/src/impact.rs"]
 mod impact;
+#[path = "../../judge-cost/src/query.rs"]
+mod query;
 
+use chrono_judge_cost::CostImpact;
 use serde_json::{Value, json};
 
 #[test]
@@ -8,9 +11,8 @@ fn the_filemap_command_distinguishes_input_rejections_from_absent_or_broken_outp
     let input = json!({"schema":"value passed through","closure":{}});
     let protocol = json!({"timeout_seconds":3,"stdout_limit_bytes":800});
     let env = json!({"PATH":"/tools"});
-    let summary = impact::decode(&input, &protocol, &env, |spec, stdin| {
-        assert_eq!(spec.program, "chrono-judge-filemap");
-        assert_eq!(spec.args, ["impact-summary"]);
+    let summary = impact::decode::<CostImpact>(&input, &protocol, &env, |spec, stdin| {
+        assert_eq!(spec.argv, ["chrono-judge-filemap", "impact-summary"]);
         assert_eq!(spec.env["PATH"], "/tools");
         assert_eq!((spec.timeout_seconds, spec.output_limit_bytes), (3,800));
         assert_eq!(serde_json::from_slice::<Value>(stdin).unwrap(), input);
@@ -38,7 +40,7 @@ fn the_filemap_command_distinguishes_input_rejections_from_absent_or_broken_outp
             "E_IMPACT: missing field",
         ),
     ] {
-        let diagnostics = impact::decode(&input, &protocol, &env, |_, _| result)
+        let diagnostics = impact::decode::<CostImpact>(&input, &protocol, &env, |_, _| result)
             .err()
             .unwrap();
         assert!(diagnostics.starts_with(error), "{diagnostics}");

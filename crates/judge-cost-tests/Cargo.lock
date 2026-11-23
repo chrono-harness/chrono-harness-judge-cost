@@ -99,7 +99,6 @@ dependencies = [
 name = "chrono-judge-cost-tests"
 version = "0.1.0"
 dependencies = [
- "chrono-harness",
  "chrono-judge-cost",
  "serde",
  "serde_json",

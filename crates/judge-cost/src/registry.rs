@@ -1,4 +1,4 @@
-use chrono_harness::CommandSpec;
+use crate::query;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,11 +60,10 @@ pub(crate) fn query(
     request: &[u8],
     protocol: &Value,
     environment: &Value,
-    invoke: impl FnOnce(&CommandSpec, &[u8]) -> Result<(i32, Vec<u8>, Vec<u8>), String>,
+    invoke: impl FnOnce(query::Command, &[u8]) -> Result<(i32, Vec<u8>, Vec<u8>), String>,
 ) -> Result<Reply, String> {
-    let cmd = CommandSpec {
-        program: "chrono-judge-registration".into(),
-        args: vec!["filemap-views".into()],
+    let cmd = query::Command {
+        argv: ["chrono-judge-registration", "filemap-views"],
         env: serde_json::from_value(environment.clone()).map_err(|e| e.to_string())?,
         timeout_seconds: protocol["timeout_seconds"]
             .as_u64()
@@ -74,7 +73,7 @@ pub(crate) fn query(
             .and_then(|n| usize::try_from(n).ok())
             .ok_or("invalid registration output bound")?,
     };
-    let (code, output, diagnostic) = invoke(&cmd, request)?;
+    let (code, output, diagnostic) = invoke(cmd, request)?;
     if code != 0 {
         let error = std::str::from_utf8(&diagnostic).map_err(|e| e.to_string())?;
         return Err(if error.is_empty() {

@@ -1,6 +1,6 @@
 //! Explicit declared costs for the already-selected FILEMAP impact. No cost inference.
-use registry::CostFile;
 pub use registry::CostRegistry;
+use verified_cost::CostFile;
 mod registry;
 pub mod report;
 use serde_json::{Map, Value, json};
@@ -50,22 +50,19 @@ fn file_cost(r: &CostRegistry, index: usize, file: &CostFile) -> Result<Value, S
 fn entry(r: &CostRegistry, node: &str) -> Result<Value, String> {
     let files = &r.filemap.files;
     if let Some(path) = node.strip_prefix("file:") {
-        let Some((i, f)) = files.iter().enumerate().find(|(_, f)| f.path == path) else {
+        let Some(i) = verified_cost::first_declaration(files, path) else {
             return Ok(Value::Null);
         };
-        return Ok(json!({"kind":"file","costs":[file_cost(r,i,f)?]}));
+        return Ok(json!({"kind":"file","costs":[file_cost(r,i,&files[i])?]}));
     }
     if let Some(id) = node.strip_prefix("test:") {
         if !r.nodes.contains(node) {
             return Ok(Value::Null);
         }
-        let (i, row) = r
-            .filemap
-            .test_costs
-            .iter()
-            .enumerate()
-            .find(|(_, row)| row.test == id)
+        let test_costs = &r.filemap.test_costs;
+        let i = verified_cost::first_declaration(test_costs, id)
             .ok_or_else(|| format!("E_COST_REFERENCE: missing test cost {node}"))?;
+        let row = &test_costs[i];
         return Ok(json!({"kind":"test","costs":[reference(r,&row.cost,node,
             format!("/test_costs/{i}/cost"))?]}));
     }
@@ -82,15 +79,11 @@ fn entry(r: &CostRegistry, node: &str) -> Result<Value, String> {
         return Ok(Value::Null);
     }
     // Ownership is declared data. Keep each member and its source; costs are not additive by default.
-    let mut members: Vec<_> = files
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| f.owner == id)
-        .collect();
-    members.sort_by_key(|(_, f)| f.path.as_str());
+    let mut members = verified_cost::owner_members(files, id);
+    members.sort_by_key(|&i| files[i].path.as_str());
     let costs = members
         .into_iter()
-        .map(|(i, f)| file_cost(r, i, f))
+        .map(|i| file_cost(r, i, &files[i]))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({"kind":kind,"costs":costs}))
 }

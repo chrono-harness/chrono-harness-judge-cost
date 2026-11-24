@@ -251,7 +251,23 @@ fn report_command_publishes_the_warning_and_exact_supplied_binding() {
         .unwrap();
     let decision: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(decision["status"], "warn");
-    assert_eq!(decision["findings"][0]["code"], "W_COST_UNKNOWN");
+    assert_eq!(
+        decision["findings"],
+        json!([{
+            "code":"W_COST_UNKNOWN", "level":"warning",
+            "message":"Affected declared costs contain unknown coordinates; see costs.unknown",
+            "delta_refs":["/impact"], "causes":["/outputs/costs/unknown"]
+        }])
+    );
+    let source = decision["findings"][0]["causes"][0].as_str().unwrap();
+    assert!(
+        !decision
+            .pointer(source)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(decision["outputs"]["costs"]["binding"], binding);
     let mut malformed = input;
     malformed["impact"]["schema"] = json!("unsupported");
@@ -297,6 +313,7 @@ fn report_retains_endpoint_row_pointers_after_sorting_and_model_escaping() {
         .unwrap();
     let decision: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(decision["status"], "pass");
+    assert_eq!(decision["findings"], json!([]));
     let costs = &decision["outputs"]["costs"];
     for (endpoint, view) in [
         ("declared_before", &input["base"]),

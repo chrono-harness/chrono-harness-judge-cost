@@ -59,6 +59,26 @@ fn lookup_retains_first_row_and_all_members_in_original_order() {
 }
 
 #[cfg_attr(not(verus_keep_ghost), test)]
+fn report_publishes_one_warning_for_one_or_more_entries() {
+    let none: [u8; 0] = [];
+    let known = policy::report_decision(&none);
+    expect_name(known.status, "pass");
+    expect(known.findings.len() == 0);
+    let single = policy::report_decision(&[5u8]);
+    expect_name(single.status, "warn");
+    expect(single.findings.len() == 1);
+    let several = policy::report_decision(&[2u8, 2u8, 9u8]);
+    expect_name(several.status, "warn");
+    expect(several.findings.len() == 1);
+    let warning = &several.findings[0];
+    expect_name(warning.code, "W_COST_UNKNOWN");
+    expect_name(warning.level, "warning");
+    expect_name(warning.message, "Affected declared costs contain unknown coordinates; see costs.unknown");
+    expect_name(warning.delta_refs[0], "/impact");
+    expect_name(warning.causes[0], "/outputs/costs/unknown");
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
 fn no_missing_coordinate_is_known() {
     let known = policy::has_unknown_coordinate(false, false, false, false);
     expect(!known);

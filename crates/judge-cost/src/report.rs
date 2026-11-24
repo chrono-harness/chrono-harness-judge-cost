@@ -45,18 +45,12 @@ pub fn write_report(input: impl Read, mut output: impl Write) -> Result<(), Stri
     let query: Input = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let mut costs = produce(&query.base, &query.candidate, &query.impact)?;
     costs["binding"] = serde_json::to_value(query.binding).map_err(|error| error.to_string())?;
-    let unknown = !costs["unknown"]
+    let unknown = costs["unknown"]
         .as_array()
-        .ok_or("invalid cost unknown coordinates")?
-        .is_empty();
-    let findings = if unknown {
-        vec![json!({"code":"W_COST_UNKNOWN","level":"warning",
-            "message":"Affected declared costs contain unknown coordinates; see costs.unknown",
-            "delta_refs":["/impact"],"causes":["/outputs/costs/unknown"]})]
-    } else {
-        Vec::new()
-    };
-    let decision = json!({"status":if unknown {"warn"} else {"pass"},"findings":findings,"outputs":{"costs":costs}});
-    serde_json::to_writer(&mut output, &decision).map_err(|e| e.to_string())?;
+        .ok_or("invalid cost unknown coordinates")?;
+    let decision = crate::verified_cost::report_decision(unknown);
+    let report =
+        json!({"status":decision.status,"findings":decision.findings,"outputs":{"costs":costs}});
+    serde_json::to_writer(&mut output, &report).map_err(|e| e.to_string())?;
     output.flush().map_err(|e| e.to_string())
 }

@@ -25,6 +25,28 @@ fn expect_name(actual: &str, expected: &str)
     expect(equal);
 }
 
+/// Any changed path produces exactly one file object even when the path occurs twice.
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn duplicate_changes_have_one_prefixed_subject()
+    requires vstd::laws_cmp::obeys_cmp::<String>(),
+{
+    let rows = [policy::Changed { path: "目录/源".to_string() },
+                policy::Changed { path: "目录/源".to_string() }];
+    let result = policy::cost_subjects("chrono-filemap-impact/v6",&rows,&[],&[]);
+    expect(result.is_ok());
+    let set = result.unwrap();
+    proof {
+        reveal_with_fuel(policy::changed_names, 3);
+        assert(policy::subject_names(set@) =~= Set::empty().insert("file:"@ + "目录/源"@));
+    }
+    let wrong = policy::cost_subjects("v5",&rows,&[],&[]);
+    proof {
+        reveal_strlit("v5"); reveal_strlit("chrono-filemap-impact/v6");
+        assert("v5"@.len() != "chrono-filemap-impact/v6"@.len());
+    }
+    expect(wrong.is_err());
+}
+
 fn file(path: &str, owner: &str) -> (row: policy::CostFile)
     ensures row.path@ == path@, row.owner@ == owner@, row.cost@ == "estimate"@,
 {

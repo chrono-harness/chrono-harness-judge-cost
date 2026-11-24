@@ -371,3 +371,70 @@ fn report_retains_endpoint_row_pointers_after_sorting_and_model_escaping() {
         assert_eq!(members[3]["reference"], "known");
     }
 }
+
+#[test]
+fn report_keys_are_the_union_of_delta_reached_owners_and_required_tests() {
+    let mut source = known();
+    let fm = &mut source["filemap"];
+    let mut row = fm["files"][0].clone();
+    row["path"] = json!("目录/一.bin");
+    row["owner"] = json!("only-script");
+    fm["files"].as_array_mut().unwrap().push(row);
+    source["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("script:only-script"));
+    let base = serde_json::from_value(source.clone()).unwrap();
+    let candidate = serde_json::from_value(source).unwrap();
+    let mut impact = FilemapImpact {
+        schema: "chrono-filemap-impact/v6".into(),
+        delta: vec![
+            ChangedPath {
+                path: "目录/一.bin".into(),
+            },
+            ChangedPath {
+                path: "目录/一.bin".into(),
+            },
+        ],
+        reached: [
+            "file:src.bin",
+            "project:p",
+            "script:only-script",
+            "test:ignore",
+            "files:skip",
+            "scripted:skip",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect(),
+        required_tests: vec!["test:t".into(), "test:t".into()],
+        tests: vec!["test:unselected".into()],
+        retired_tests: vec!["test:unselected".into()],
+    };
+    let report = produce(&base, &candidate, &impact).unwrap();
+    for endpoint in ["declared_before", "declared_after"] {
+        let keys: std::collections::BTreeSet<_> = report[endpoint]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "file:目录/一.bin",
+                "file:src.bin",
+                "project:p",
+                "script:only-script",
+                "test:t"
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+    impact.schema.push('x');
+    assert_eq!(
+        produce(&base, &candidate, &impact).unwrap_err(),
+        "E_IMPACT: unsupported cost input schema"
+    );
+}

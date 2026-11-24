@@ -266,3 +266,91 @@ fn report_command_publishes_the_warning_and_exact_supplied_binding() {
     );
     assert!(output.is_empty());
 }
+
+#[test]
+fn report_retains_endpoint_row_pointers_after_sorting_and_model_escaping() {
+    let a = known();
+    let mut b = a.clone();
+    b["nodes"].as_array_mut().unwrap().push(json!("script:p"));
+    let files = b["filemap"]["files"].as_array_mut().unwrap();
+    files.reverse();
+    let source_row = files.iter().position(|f| f["path"] == "src.bin").unwrap();
+    files[source_row]["cost"] = json!("updated~/");
+    files.push(json!({"path":"src.bin","owner":"p","cost":"known"}));
+    let known_model = b["filemap"]["cost_models"]["known"].clone();
+    b["filemap"]["cost_models"]["updated~/"] = known_model;
+    b["filemap"]["test_costs"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, json!({"test":"another","cost":"known"}));
+    let mut impacts: Value =
+        serde_json::from_str(include_str!("fixtures/impact-summaries.json")).unwrap();
+    let impact = &mut impacts["source_change"];
+    impact["reached"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("script:p"));
+    let binding = json!({"base":"base","candidate":"candidate","candidate_tree":"tree","registry_digest":"registry","context_digest":"context"});
+    let input = json!({"base":a,"candidate":b,"impact":impact,"binding":binding});
+    let mut output = Vec::new();
+    chrono_judge_cost::report::write_report(&serde_json::to_vec(&input).unwrap()[..], &mut output)
+        .unwrap();
+    let decision: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(decision["status"], "pass");
+    let costs = &decision["outputs"]["costs"];
+    for (endpoint, view) in [
+        ("declared_before", &input["base"]),
+        ("declared_after", &input["candidate"]),
+    ] {
+        for subject in ["file:src.bin", "test:t", "project:p", "script:p"] {
+            if endpoint == "declared_before" && subject == "script:p" {
+                assert!(costs[endpoint][subject].is_null());
+                continue;
+            }
+            for row in costs[endpoint][subject]["costs"].as_array().unwrap() {
+                for key in ["declaration", "source"] {
+                    assert_eq!(row[key]["registry"], FM);
+                }
+                let fm = &view["filemap"];
+                assert_eq!(
+                    fm.pointer(row["declaration"]["pointer"].as_str().unwrap()),
+                    Some(&row["reference"])
+                );
+                assert_eq!(
+                    fm.pointer(row["source"]["pointer"].as_str().unwrap()),
+                    Some(&row["value"])
+                );
+            }
+        }
+    }
+    assert_eq!(
+        costs["declared_before"]["test:t"]["costs"][0]["declaration"]["pointer"],
+        "/test_costs/0/cost"
+    );
+    let after = &costs["declared_after"];
+    assert_eq!(
+        after["test:t"]["costs"][0]["declaration"]["pointer"],
+        "/test_costs/1/cost"
+    );
+    assert_eq!(
+        after["file:src.bin"]["costs"][0]["source"]["pointer"],
+        "/cost_models/updated~0~1"
+    );
+    for subject in ["project:p", "script:p"] {
+        let members = after[subject]["costs"].as_array().unwrap();
+        assert_eq!(
+            members
+                .iter()
+                .map(|m| m["member"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "file:p/Cargo.lock",
+                "file:p/Cargo.toml",
+                "file:src.bin",
+                "file:src.bin"
+            ]
+        );
+        assert_eq!(members[2]["reference"], "updated~/");
+        assert_eq!(members[3]["reference"], "known");
+    }
+}

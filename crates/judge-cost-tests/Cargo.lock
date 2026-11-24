@@ -15,6 +15,7 @@ dependencies = [
  "serde",
  "serde_json",
  "verus_builtin_macros",
+ "vstd",
 ]
 
 [[package]]

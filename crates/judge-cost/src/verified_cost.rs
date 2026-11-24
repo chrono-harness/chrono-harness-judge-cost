@@ -1,11 +1,87 @@
-//! Declared cost coordinate admission is a proved policy.
+//! Declared cost selection and coordinate admission for the production report.
 #![allow(unexpected_cfgs)]
 #[cfg(not(verus_keep_ghost))]
 use verus_builtin_macros::verus;
+use vstd::contrib::exec_spec::ExecSpecEq;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
 verus! {
+
+#[cfg_attr(not(verus_keep_ghost), derive(Debug, serde::Deserialize))]
+pub struct CostFile {
+    pub path: String,
+    pub owner: String,
+    pub cost: String,
+}
+
+#[cfg_attr(not(verus_keep_ghost), derive(Debug, serde::Deserialize))]
+pub struct TestCost {
+    pub test: String,
+    pub cost: String,
+}
+
+pub trait Declaration {
+    spec fn name(&self) -> Seq<char>;
+    fn key(&self) -> (out: &str)
+        ensures out@ == self.name();
+}
+
+impl Declaration for CostFile {
+    open spec fn name(&self) -> Seq<char> { self.path@ }
+    fn key(&self) -> &str { self.path.as_str() }
+}
+
+impl Declaration for TestCost {
+    open spec fn name(&self) -> Seq<char> { self.test@ }
+    fn key(&self) -> &str { self.test.as_str() }
+}
+
+/// Preserve the first declaration and hence its JSON pointer at this endpoint.
+pub fn first_declaration<D: Declaration>(rows: &[D], key: &str) -> (found: Option<usize>)
+    ensures match found {
+        Some(i) => i < rows.len() && rows@[i as int].name() == key@
+            && forall|j: int| 0 <= j < i ==> (#[trigger] rows@[j]).name() != key@,
+        None => forall|j: int| 0 <= j < rows.len() ==> (#[trigger] rows@[j]).name() != key@,
+    },
+{
+    let mut i = 0;
+    while i < rows.len()
+        invariant i <= rows.len(),
+            forall|j: int| 0 <= j < i ==> (#[trigger] rows@[j]).name() != key@,
+        decreases rows.len() - i,
+    {
+        if <&str>::exec_eq(rows[i].key(), key) { return Some(i); }
+        i += 1;
+    }
+    None
+}
+
+pub open spec fn owned_rows(rows: Seq<CostFile>, owner: Seq<char>, end: nat) -> Seq<usize>
+    recommends end <= rows.len(),
+    decreases end,
+{
+    if end == 0 { seq![] } else {
+        let previous = owned_rows(rows, owner, (end - 1) as nat);
+        if rows[end - 1].owner@ == owner { previous.push((end - 1) as usize) } else { previous }
+    }
+}
+
+/// Select every original row for this owner, including equal paths at distinct positions.
+pub fn owner_members(rows: &[CostFile], owner: &str) -> (members: Vec<usize>)
+    ensures members@ == owned_rows(rows@, owner@, rows.len() as nat),
+{
+    let mut members = Vec::new();
+    let mut i = 0;
+    while i < rows.len()
+        invariant i <= rows.len(), members@ == owned_rows(rows@, owner@, i as nat),
+        decreases rows.len() - i,
+    {
+        if <&str>::exec_eq(rows[i].owner.as_str(), owner) { members.push(i); }
+        i += 1;
+    }
+    members
+}
 
 /// A cost declaration is unknown when any of its four coordinates is absent.
 pub open spec fn unknown_coordinate(

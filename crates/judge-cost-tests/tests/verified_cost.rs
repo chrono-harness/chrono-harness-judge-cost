@@ -25,6 +25,39 @@ fn expect_name(actual: &str, expected: &str)
     expect(equal);
 }
 
+fn file(path: &str, owner: &str) -> (row: policy::CostFile)
+    ensures row.path@ == path@, row.owner@ == owner@, row.cost@ == "estimate"@,
+{
+    policy::CostFile { path: path.to_string(), owner: owner.to_string(), cost: "estimate".to_string() }
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn lookup_retains_first_row_and_all_members_in_original_order() {
+    proof {
+        reveal_strlit("");
+        reveal_strlit("费用");
+        reveal_strlit("费用/一");
+        assert(""@.len() == 0 && "费用"@.len() == 2 && "费用/一"@.len() == 4);
+    }
+    let rows = vec![file("", ""), file("费用", "费用"), file("", ""), file("费用", "费用")];
+    let hit = policy::first_declaration(&rows, "费用");
+    expect(hit == Some(1));
+    expect_name(rows[hit.unwrap()].cost.as_str(), "estimate");
+    let miss = policy::first_declaration(&rows, "费用/一");
+    expect(miss.is_none());
+    let selected = policy::owner_members(&rows, "费用");
+    proof { reveal_with_fuel(policy::owned_rows, 5); }
+    expect(selected.len() == 2);
+    expect(selected[0] == 1 && selected[1] == 3);
+    let empty = policy::owner_members(&rows, "费用/一");
+    expect(empty.len() == 0);
+    let tests = vec![policy::TestCost { test: "test".to_string(), cost: "old".to_string() },
+        policy::TestCost { test: "test".to_string(), cost: "later".to_string() }];
+    let first = policy::first_declaration(&tests, "test");
+    expect(first == Some(0));
+    expect_name(tests[first.unwrap()].cost.as_str(), "old");
+}
+
 #[cfg_attr(not(verus_keep_ghost), test)]
 fn no_missing_coordinate_is_known() {
     let known = policy::has_unknown_coordinate(false, false, false, false);

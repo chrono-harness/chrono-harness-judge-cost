@@ -2,7 +2,7 @@
 
 比较变更前后的声明成本。
 
-运行 `./check.sh` 验证独立组件。证明使用 Verus 0.2026.04.24.f8e1704，通过环境变量 `VERUS` 指定可执行文件。
+从集成工作树运行 `mise exec -- ./check.sh`，按 Git 变更和本仓 FILEMAP 执行检查。成本报告、测试、工具清单与检查登记的变更会选中正式报告用例和产品、独立预期两个 Verus 根。CI 汇总读取该单元当天保留的真实报告。其余没有证明根的程序文件仍保留未知覆盖。
 
 [固定来源](https://github.com/ChronoAIProject/chrono-harness/tree/5f6892dfa2f73675a84e4ebdc3b06eb83b824d6e/crates/judge-cost)
 

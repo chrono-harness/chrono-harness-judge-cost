@@ -83,6 +83,48 @@ pub fn owner_members(rows: &[CostFile], owner: &str) -> (members: Vec<usize>)
     members
 }
 
+#[cfg_attr(not(verus_keep_ghost), derive(serde::Serialize))]
+pub struct CostFinding {
+    pub code: &'static str,
+    pub level: &'static str,
+    pub message: &'static str,
+    pub delta_refs: [&'static str; 1],
+    pub causes: [&'static str; 1],
+}
+
+pub struct ReportDecision {
+    pub status: &'static str,
+    pub findings: Vec<CostFinding>,
+}
+
+/// The report adapter passes the actual published unknown entries.
+pub fn report_decision<T>(unknown: &[T]) -> (decision: ReportDecision)
+    ensures
+        decision.status@ == if unknown.len() == 0 { "pass"@ } else { "warn"@ },
+        decision.findings.len() == if unknown.len() == 0 { 0usize } else { 1usize },
+        unknown.len() > 0 ==> {
+            let f = decision.findings@[0];
+            &&& f.code@ == "W_COST_UNKNOWN"@
+            &&& f.level@ == "warning"@
+            &&& f.message@ == "Affected declared costs contain unknown coordinates; see costs.unknown"@
+            &&& f.delta_refs@[0]@ == "/impact"@
+            &&& f.causes@[0]@ == "/outputs/costs/unknown"@
+        },
+{
+    if unknown.len() == 0 {
+        ReportDecision { status: "pass", findings: Vec::new() }
+    } else {
+        let warning = CostFinding {
+            code: "W_COST_UNKNOWN",
+            level: "warning",
+            message: "Affected declared costs contain unknown coordinates; see costs.unknown",
+            delta_refs: ["/impact"],
+            causes: ["/outputs/costs/unknown"],
+        };
+        ReportDecision { status: "warn", findings: vec![warning] }
+    }
+}
+
 /// A cost declaration is unknown when any of its four coordinates is absent.
 pub open spec fn unknown_coordinate(
     cpu_missing: bool,

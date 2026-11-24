@@ -27,16 +27,10 @@ prove() {
 admit_proof() {
   local label=$1
   shift
-  local output="$scratch/$label.rlib" report="$scratch/$label.json"
-  test -s "$report" && test -s "$output" && test -s "$output.d" ||
-    coverage_failure "$label: missing required proof result"
-  cat "$report"
-  jq -e '.verus.version == "0.2026.04.24.f8e1704" and
-    .verus.commit == "f8e17045c4ac17a02e566b8997070f2eecc255be" and
-    (."verification-results" | .success == true and ."is-verifying-entire-crate" == true and
-    ."encountered-error" == false and ."encountered-vir-error" == false and
-    .errors == 0 and .verified > 0)' "$report" >/dev/null || coverage_failure "$label: unexpected verifier report"
-  chrono-host-bootstrap check-compiler-sources proof "$output" "$@" || coverage_failure "$label: compiled sources differ from required inputs"
+  chrono-host-bootstrap check-compiler-proof \
+    0.2026.04.24.f8e1704 f8e17045c4ac17a02e566b8997070f2eecc255be \
+    "$scratch/$label.json" "$scratch/$label.rlib" "$@" ||
+    coverage_failure "$label: required proof result was not admitted"
 }
 
 # Read the exact library selected by Cargo in the build of the tested executable.
@@ -53,6 +47,7 @@ chrono-host-bootstrap check-compiler-sources native "$stem" src/verified_cost.rs
 
 policy=crates/judge-cost/src/verified_cost.rs
 expectations=crates/judge-cost-tests/tests/verified_cost.rs
+
 product_operation=verify.judge-cost
 test_operation=verify.judge-cost-tests
 

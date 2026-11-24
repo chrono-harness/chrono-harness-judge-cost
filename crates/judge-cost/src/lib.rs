@@ -4,7 +4,7 @@ use verified_cost::CostFile;
 mod registry;
 pub mod report;
 use serde_json::{Map, Value, json};
-use std::collections::BTreeSet;
+pub use verified_cost::ChangedFile;
 
 mod verified_cost;
 
@@ -17,11 +17,6 @@ pub struct FilemapImpact<D> {
     pub required_tests: Vec<String>,
     pub tests: Vec<String>,
     pub retired_tests: Vec<String>,
-}
-
-/// A report selects the declared costs of each changed file by its path.
-pub trait ChangedFile {
-    fn path(&self) -> &str;
 }
 
 pub const COST_SCHEMA: &str = "chrono-costs/v1";
@@ -94,24 +89,12 @@ pub fn produce<D: ChangedFile>(
     candidate: &CostRegistry,
     impact: &FilemapImpact<D>,
 ) -> Result<Value, String> {
-    if impact.schema != "chrono-filemap-impact/v6" {
-        return Err("E_IMPACT: unsupported cost input schema".into());
-    }
-    let mut subjects: BTreeSet<String> = impact
-        .delta
-        .iter()
-        .map(|d| format!("file:{}", d.path()))
-        .collect();
-    subjects.extend(
-        impact
-            .reached
-            .iter()
-            .filter(|n| {
-                n.starts_with("file:") || n.starts_with("project:") || n.starts_with("script:")
-            })
-            .cloned(),
-    );
-    subjects.extend(impact.required_tests.iter().cloned());
+    let subjects = verified_cost::cost_subjects(
+        &impact.schema,
+        &impact.delta,
+        &impact.reached,
+        &impact.required_tests,
+    )?;
     let mut before = Map::new();
     let mut after = Map::new();
     let mut unknown = vec![];

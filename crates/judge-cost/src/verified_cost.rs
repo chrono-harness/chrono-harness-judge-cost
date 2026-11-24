@@ -1,12 +1,156 @@
 //! Declared cost selection and coordinate admission for the production report.
 #![allow(unexpected_cfgs)]
+use std::collections::BTreeSet;
 #[cfg(not(verus_keep_ghost))]
 use verus_builtin_macros::verus;
 use vstd::contrib::exec_spec::ExecSpecEq;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
+use vstd::string::StringExecFns;
 
 verus! {
+
+/// Delta entries supplied by the FILEMAP decoder expose their changed path.
+pub trait ChangedFile {
+    spec fn path_text(&self) -> Seq<char>;
+    fn path(&self) -> (text: &str)
+        ensures text@ == self.path_text();
+}
+
+#[cfg_attr(not(verus_keep_ghost), derive(serde::Deserialize))]
+pub struct Changed {
+    pub path: String,
+}
+impl ChangedFile for Changed {
+    open spec fn path_text(&self) -> Seq<char> { self.path@ }
+    fn path(&self) -> &str { self.path.as_str() }
+}
+
+fn has_prefix(text: &str, prefix: &str) -> (found: bool)
+    ensures found == prefix@.is_prefix_of(text@),
+{
+    let mut chars = text.chars();
+    let mut expected = prefix.chars();
+    loop
+        invariant
+            chars@.1 == text@, expected@.1 == prefix@,
+            0 <= chars@.0 <= text@.len(), 0 <= expected@.0 <= prefix@.len(),
+            chars@.0 == expected@.0,
+            forall|i:int| 0 <= i < chars@.0 ==> text@[i] == prefix@[i],
+        decreases prefix@.len() - expected@.0 + 1,
+    {
+        let c = match expected.next() {
+            None => {
+                assert(prefix@ =~= text@.subrange(0, prefix@.len() as int));
+                return true;
+            }
+            Some(c) => c,
+        };
+        match chars.next() {
+            Some(seen) if seen == c => {},
+            _ => return false,
+        }
+    }
+}
+
+pub open spec fn reached_subject(text: Seq<char>) -> bool {
+    "file:"@.is_prefix_of(text) || "project:"@.is_prefix_of(text) || "script:"@.is_prefix_of(text)
+}
+
+pub open spec fn subject_names(set: Set<String>) -> Set<Seq<char>> {
+    set.map(|s: String| s@)
+}
+
+fn add_subject(set: &mut BTreeSet<String>, subject: String)
+    requires vstd::laws_cmp::obeys_cmp::<String>(),
+    ensures subject_names(set@) == subject_names(old(set)@).insert(subject@),
+{
+    let ghost previous = set@;
+    set.insert(subject);
+    assert forall|text: Seq<char>| #[trigger] subject_names(set@).contains(text)
+        <==> subject_names(previous).insert(subject@).contains(text) by {
+        if text == subject@ {
+            assert(set@.contains(subject));
+            assert(exists|s:String| set@.contains(s) && text == s@);
+        } else if subject_names(set@).contains(text) {
+            let s = choose|s:String| set@.contains(s) && text == s@;
+            assert(previous.contains(s));
+            assert(exists|old_key:String| previous.contains(old_key) && text == old_key@);
+        } else if subject_names(previous).contains(text) {
+            let s = choose|s:String| previous.contains(s) && text == s@;
+            assert(set@.contains(s));
+            assert(exists|new_key:String| set@.contains(new_key) && text == new_key@);
+        }
+    }
+    assert(subject_names(set@) =~= subject_names(previous).insert(subject@));
+}
+
+/// Prefix fold of the actual input rows. The report iterates the ordered set returned here.
+pub open spec fn changed_names<D: ChangedFile>(rows: Seq<D>, n: nat) -> Set<Seq<char>>
+    decreases n,
+{
+    if n == 0 { Set::empty() } else {
+        changed_names(rows, (n-1) as nat).insert("file:"@ + rows[n-1].path_text())
+    }
+}
+pub open spec fn node_names(rows: Seq<String>, n: nat, reached: bool) -> Set<Seq<char>>
+    decreases n,
+{
+    if n == 0 { Set::empty() } else {
+        let prev = node_names(rows, (n-1) as nat, reached);
+        let name = rows[n-1]@;
+        if !reached || reached_subject(name) { prev.insert(name) } else { prev }
+    }
+}
+
+fn add_nodes(set: &mut BTreeSet<String>, rows: &[String], reached: bool)
+    requires vstd::laws_cmp::obeys_cmp::<String>(),
+    ensures subject_names(set@) == subject_names(old(set)@).union(node_names(rows@,rows@.len(),reached)),
+{
+    let mut i = 0;
+    while i < rows.len()
+        invariant i <= rows.len(), vstd::laws_cmp::obeys_cmp::<String>(),
+            subject_names(set@) == subject_names(old(set)@).union(node_names(rows@,i as nat,reached)),
+        decreases rows.len() - i,
+    {
+        let name = rows[i].as_str();
+        if !reached || has_prefix(name,"file:") || has_prefix(name,"project:") || has_prefix(name,"script:") {
+            add_subject(set, rows[i].clone());
+        }
+        assert(subject_names(set@) =~= subject_names(old(set)@).union(node_names(rows@,(i+1) as nat,reached)));
+        i += 1;
+    }
+}
+
+/// The ordered set uses Rust's standard String total order. The pinned Verus
+/// library exposes its BTreeSet model under the Ord/Eq consistency contract.
+pub fn cost_subjects<D: ChangedFile>(schema: &str, delta: &[D], reached: &[String], required: &[String])
+    -> (subjects: Result<BTreeSet<String>, &'static str>)
+    requires vstd::laws_cmp::obeys_cmp::<String>(),
+    ensures match subjects {
+        Err(err) => schema@ != "chrono-filemap-impact/v6"@ && err@ == "E_IMPACT: unsupported cost input schema"@,
+        Ok(set) => schema@ == "chrono-filemap-impact/v6"@ && subject_names(set@) ==
+            changed_names(delta@,delta@.len()).union(node_names(reached@,reached@.len(),true))
+                .union(node_names(required@,required@.len(),false)),
+    },
+{
+    if !<&str>::exec_eq(schema,"chrono-filemap-impact/v6") {
+        return Err("E_IMPACT: unsupported cost input schema");
+    }
+    let mut set = BTreeSet::new();
+    let mut i = 0;
+    while i < delta.len()
+        invariant i <= delta.len(), vstd::laws_cmp::obeys_cmp::<String>(),
+            subject_names(set@) == changed_names(delta@,i as nat),
+        decreases delta.len() - i,
+    {
+        add_subject(&mut set, "file:".to_string().concat(delta[i].path()));
+        i += 1;
+    }
+    add_nodes(&mut set,reached,true);
+    add_nodes(&mut set,required,false);
+    Ok(set)
+}
 
 #[cfg_attr(not(verus_keep_ghost), derive(Debug, serde::Deserialize))]
 pub struct CostFile {

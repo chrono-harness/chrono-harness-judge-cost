@@ -1,18 +1,9 @@
 //! Product input for a declared-cost report, after both producers have decoded their documents.
-use crate::{ChangedFile, CostRegistry, FilemapImpact, produce};
+use crate::verified_cost::Changed;
+use crate::{CostRegistry, FilemapImpact, produce};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::{Read, Write};
-
-#[derive(Deserialize)]
-struct Changed {
-    path: String,
-}
-impl ChangedFile for Changed {
-    fn path(&self) -> &str {
-        &self.path
-    }
-}
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

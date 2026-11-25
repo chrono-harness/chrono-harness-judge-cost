@@ -12,6 +12,8 @@
 0 * * * * cd '/absolute/path/to/chrono-harness-judge-cost' && '/absolute/path/to/mise' exec -- chrono-worktree maintain --host-root . --config .chrono-harness/worktree.json >/dev/null
 ```
 
+长期主检出的原生编译使用专属的 `.chrono-harness/native-check/`。整次标准检查持有工作树租约。同一项每小时维护在取得排他租约后批量回收已登记的临时目录，包括检查中断后遗留的 Cargo 文件。需要跨期使用的报告应在下一次维护前转存。外置 `CARGO_TARGET_DIR` 由调用方维护。迁移前遗留的 `target/check.*` 需先确认所有者和使用情况，再转存或移除。
+
 运行 `chrono-judge-cost --protocol chrono-judge/v1` 时，程序调用已安装的 `chrono-harness judge-pipeline`。runner 核对封存请求、读取宿主限额、记录日志，并调用 `chrono-judge-filemap cost-inputs-v1` 取得两端的已解释登记、完整变更范围和 Git 观察。FILEMAP 使用已安装的 registration 命令。runner 随后调用同一成本程序的 `report-v1` 生成判定与成本报告。
 
 `report-v1` 直接从 stdin 读取一份由生产者准备的 JSON，包含 `base`、`candidate`、`impact` 和 `binding`。它向 stdout 输出状态、findings 和 `outputs.costs`。独立编译成本程序只需要本仓源码和 crates.io 依赖。

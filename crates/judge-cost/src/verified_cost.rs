@@ -66,8 +66,99 @@ fn has_prefix(text: &str, prefix: &str) -> (found: bool)
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum CostKind { File, Test, Project, Script }
+
+impl CostKind {
+    pub open spec fn tag(self) -> Seq<char> {
+        match self {
+            Self::File => "file:"@, Self::Test => "test:"@,
+            Self::Project => "project:"@, Self::Script => "script:"@,
+        }
+    }
+    fn prefix(self) -> (s: &'static str)
+        ensures s@ == self.tag(),
+    {
+        match self {
+            Self::File => "file:", Self::Test => "test:",
+            Self::Project => "project:", Self::Script => "script:",
+        }
+    }
+}
+
+pub open spec fn classification(text: Seq<char>) -> Option<CostKind> {
+    if CostKind::File.tag().is_prefix_of(text) { Some(CostKind::File) }
+    else if CostKind::Project.tag().is_prefix_of(text) { Some(CostKind::Project) }
+    else if CostKind::Script.tag().is_prefix_of(text) { Some(CostKind::Script) }
+    else if CostKind::Test.tag().is_prefix_of(text) { Some(CostKind::Test) }
+    else { None }
+}
+
+fn cost_kind(text: &str) -> (kind: Option<CostKind>)
+    ensures kind == classification(text@),
+{
+    if has_prefix(text, CostKind::File.prefix()) { Some(CostKind::File) }
+    else if has_prefix(text, CostKind::Project.prefix()) { Some(CostKind::Project) }
+    else if has_prefix(text, CostKind::Script.prefix()) { Some(CostKind::Script) }
+    else if has_prefix(text, CostKind::Test.prefix()) { Some(CostKind::Test) }
+    else { None }
+}
+
 pub open spec fn reached_subject(text: Seq<char>) -> bool {
     "file:"@.is_prefix_of(text) || "project:"@.is_prefix_of(text) || "script:"@.is_prefix_of(text)
+}
+
+/// The end of any complete character prefix splits the original UTF-8 bytes.
+proof fn prefix_encoding(a: Seq<char>, b: Seq<char>)
+    ensures
+        vstd::utf8::encode_utf8(a + b) == vstd::utf8::encode_utf8(a) + vstd::utf8::encode_utf8(b),
+        vstd::utf8::is_char_boundary(vstd::utf8::encode_utf8(a + b), vstd::utf8::encode_utf8(a).len() as int),
+    decreases a.len(),
+{
+    use vstd::utf8::*;
+    let text = a + b;
+    encode_utf8_valid_utf8(text);
+    if a.len() == 0 {
+        assert(text =~= b);
+    } else {
+        assert(text.drop_first() =~= a.drop_first() + b);
+        prefix_encoding(a.drop_first(), b);
+        encode_utf8_first_scalar(text);
+        assert(pop_first_scalar(encode_utf8(text)) =~= encode_utf8(text.drop_first()));
+    }
+}
+
+pub fn cost_subject(text: &str) -> (part: Option<(CostKind, &str)>)
+    ensures
+        match part {
+            Some((kind, id)) => classification(text@) == Some(kind) && text@ == kind.tag() + id@
+                && id@ == text@.skip(kind.tag().len() as int),
+            None => classification(text@).is_none(),
+        },
+{
+    #[cfg(verus_keep_ghost)]
+    use vstd::string::StringSliceAdditionalSpecFns;
+    #[cfg(verus_keep_ghost)]
+    use vstd::utf8::*;
+    let Some(kind) = cost_kind(text) else { return None; };
+    let prefix = kind.prefix();
+    let n = prefix.as_bytes().len();
+    let ghost suffix = text@.skip(prefix@.len() as int);
+    proof {
+        assert(prefix@.is_prefix_of(text@));
+        assert(text@ =~= prefix@ + suffix);
+        prefix_encoding(prefix@, suffix);
+        assert(n == encode_utf8(prefix@).len());
+        assert(text.spec_bytes() == encode_utf8(text@));
+        assert(is_char_boundary(text.spec_bytes(), n as int));
+    }
+    let (_, id) = text.split_at(n);
+    proof {
+        assert(id.spec_bytes() =~= encode_utf8(suffix));
+        encode_utf8_decode_utf8(suffix);
+        encode_utf8_decode_utf8(id@);
+    }
+    Some((kind, id))
 }
 
 pub open spec fn subject_names(set: Set<String>) -> Set<Seq<char>> {
@@ -127,7 +218,7 @@ fn add_nodes(set: &mut BTreeSet<String>, rows: &[String], reached: bool)
         decreases rows.len() - i,
     {
         let name = rows[i].as_str();
-        if !reached || has_prefix(name,"file:") || has_prefix(name,"project:") || has_prefix(name,"script:") {
+        if !reached || matches!(cost_kind(name), Some(CostKind::File | CostKind::Project | CostKind::Script)) {
             add_subject(set, rows[i].clone());
         }
         assert(subject_names(set@) =~= subject_names(old(set)@).union(node_names(rows@,(i+1) as nat,reached)));

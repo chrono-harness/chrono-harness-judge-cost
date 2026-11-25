@@ -1,6 +1,6 @@
 //! Explicit declared costs for the already-selected FILEMAP impact. No cost inference.
 pub use registry::CostRegistry;
-use verified_cost::CostFile;
+use verified_cost::{CostFile, CostKind};
 mod registry;
 pub mod report;
 use serde_json::{Map, Value, json};
@@ -44,31 +44,28 @@ fn file_cost(r: &CostRegistry, index: usize, file: &CostFile) -> Result<Value, S
         format!("/files/{index}/cost"),
     )
 }
-fn entry(r: &CostRegistry, node: &str) -> Result<Value, String> {
+fn entry(r: &CostRegistry, node: &str, kind: CostKind, id: &str) -> Result<Value, String> {
     let files = &r.filemap.files;
-    if let Some(path) = node.strip_prefix("file:") {
-        let Some(i) = verified_cost::first_declaration(files, path) else {
-            return Ok(Value::Null);
-        };
-        return Ok(json!({"kind":"file","costs":[file_cost(r,i,&files[i])?]}));
-    }
-    if let Some(id) = node.strip_prefix("test:") {
-        if !r.nodes.contains(node) {
-            return Ok(Value::Null);
+    let kind = match kind {
+        CostKind::File => {
+            let Some(i) = verified_cost::first_declaration(files, id) else {
+                return Ok(Value::Null);
+            };
+            return Ok(json!({"kind":"file","costs":[file_cost(r,i,&files[i])?]}));
         }
-        let test_costs = &r.filemap.test_costs;
-        let i = verified_cost::first_declaration(test_costs, id)
-            .ok_or_else(|| format!("E_COST_REFERENCE: missing test cost {node}"))?;
-        let row = &test_costs[i];
-        return Ok(json!({"kind":"test","costs":[reference(r,&row.cost,node,
-            format!("/test_costs/{i}/cost"))?]}));
-    }
-    let (kind, id) = if let Some(id) = node.strip_prefix("project:") {
-        ("project", id)
-    } else if let Some(id) = node.strip_prefix("script:") {
-        ("script", id)
-    } else {
-        return Err(format!("E_COST_REFERENCE: unsupported cost subject {node}"));
+        CostKind::Test => {
+            if !r.nodes.contains(node) {
+                return Ok(Value::Null);
+            }
+            let test_costs = &r.filemap.test_costs;
+            let i = verified_cost::first_declaration(test_costs, id)
+                .ok_or_else(|| format!("E_COST_REFERENCE: missing test cost {node}"))?;
+            let row = &test_costs[i];
+            return Ok(json!({"kind":"test","costs":[reference(r,&row.cost,node,
+                format!("/test_costs/{i}/cost"))?]}));
+        }
+        CostKind::Project => "project",
+        CostKind::Script => "script",
     };
     // The candidate decoder retains obsolete definitions in the historical view.
     // Their declared member costs remain meaningful without executing old code.
@@ -102,8 +99,10 @@ pub fn produce<D: ChangedFile>(
     let mut unknown = vec![];
     let mut removed = vec![];
     for subject in subjects {
-        let a = entry(base, &subject)?;
-        let b = entry(candidate, &subject)?;
+        let (kind, id) = verified_cost::cost_subject(&subject)
+            .ok_or_else(|| format!("E_COST_REFERENCE: unsupported cost subject {subject}"))?;
+        let a = entry(base, &subject, kind, id)?;
+        let b = entry(candidate, &subject, kind, id)?;
         verified_cost::record_subject_presence(
             !a.is_null(),
             !b.is_null(),

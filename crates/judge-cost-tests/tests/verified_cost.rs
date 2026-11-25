@@ -7,6 +7,7 @@ use verus_builtin_macros::verus;
 use vstd::contrib::exec_spec::ExecSpecEq;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
+use vstd::string::StringExecFns;
 #[cfg(verus_keep_ghost)]
 use vstd::vpanic as panic;
 
@@ -46,6 +47,52 @@ fn pointer_tokens_distinguish_controls_digits_and_unicode() {
     pointer_token_recovers_original('1');
     pointer_token_recovers_original('路');
     pointer_token_recovers_original('\0');
+}
+
+/// For every identifier, including an empty one, the report recovers all its characters.
+#[cfg_attr(not(verus_keep_ghost), allow(dead_code))]
+fn all_four_tags_recover_the_original_id(id: &str) {
+    proof {
+        reveal_strlit("file:"); reveal_strlit("project:"); reveal_strlit("script:"); reveal_strlit("test:");
+        assert("file:"@[0] != "project:"@[0] && "file:"@[0] != "script:"@[0] && "file:"@[0] != "test:"@[0]);
+        assert("project:"@[0] != "script:"@[0] && "project:"@[0] != "test:"@[0] && "script:"@[0] != "test:"@[0]);
+    }
+    let file = "file:".to_string().concat(id);
+    let project = "project:".to_string().concat(id);
+    let script = "script:".to_string().concat(id);
+    let test = "test:".to_string().concat(id);
+    assert("file:"@.is_prefix_of(file@) && "project:"@.is_prefix_of(project@)
+        && "script:"@.is_prefix_of(script@) && "test:"@.is_prefix_of(test@));
+    let f = policy::cost_subject(file.as_str()).unwrap();
+    let p = policy::cost_subject(project.as_str()).unwrap();
+    let s = policy::cost_subject(script.as_str()).unwrap();
+    let t = policy::cost_subject(test.as_str()).unwrap();
+    expect(matches!(f.0, policy::CostKind::File));
+    expect(matches!(p.0, policy::CostKind::Project));
+    expect(matches!(s.0, policy::CostKind::Script));
+    expect(matches!(t.0, policy::CostKind::Test));
+    assert(f.1@ =~= id@); assert(p.1@ =~= id@);
+    assert(s.1@ =~= id@); assert(t.1@ =~= id@);
+    expect_name(f.1, id); expect_name(p.1, id); expect_name(s.1, id); expect_name(t.1, id);
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn subject_kind_and_original_identifier() {
+    all_four_tags_recover_the_original_id("");
+    all_four_tags_recover_the_original_id("目录:β/一");
+    proof {
+        reveal_strlit("files:x"); reveal_strlit("file"); reveal_strlit("File:x"); reveal_strlit("");
+        reveal_strlit("file:"); reveal_strlit("project:"); reveal_strlit("script:"); reveal_strlit("test:");
+        assert("files:x"@[4] != "file:"@[4] && "files:x"@[0] != "project:"@[0]
+            && "files:x"@[0] != "script:"@[0] && "files:x"@[0] != "test:"@[0]);
+        assert("File:x"@[0] != "file:"@[0] && "File:x"@[0] != "project:"@[0]
+            && "File:x"@[0] != "script:"@[0] && "File:x"@[0] != "test:"@[0]);
+    }
+    let near = policy::cost_subject("files:x");
+    let bare = policy::cost_subject("file");
+    let upper = policy::cost_subject("File:x");
+    let empty = policy::cost_subject("");
+    expect(near.is_none()); expect(bare.is_none()); expect(upper.is_none()); expect(empty.is_none());
 }
 
 /// Any changed path produces exactly one file object even when the path occurs twice.

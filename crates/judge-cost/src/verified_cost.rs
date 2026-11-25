@@ -10,6 +10,19 @@ use vstd::string::StringExecFns;
 
 verus! {
 
+/// The RFC 6901 reference-token encoding emits one or two Unicode scalars.
+pub fn pointer_token(c: char) -> (token: [Option<char>; 2])
+    ensures
+        token[0] == Some(if c == '/' || c == '~' { '~' } else { c }),
+        token[1] == if c == '/' { Some('1') } else if c == '~' { Some('0') } else { None },
+{
+    match c {
+        '~' => [Some('~'), Some('0')],
+        '/' => [Some('~'), Some('1')],
+        _ => [Some(c), None],
+    }
+}
+
 /// Delta entries supplied by the FILEMAP decoder expose their changed path.
 pub trait ChangedFile {
     spec fn path_text(&self) -> Seq<char>;

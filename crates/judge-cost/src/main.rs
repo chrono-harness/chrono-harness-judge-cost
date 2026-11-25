@@ -7,7 +7,7 @@ use std::{
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args == [OsStr::new("report-v1")] {
-        return match chrono_judge_cost::report::write_report(
+        return match chrono_judge_cost::report::write_report_to_fd(
             std::io::stdin().lock(),
             std::io::stdout().lock(),
         ) {

@@ -524,6 +524,14 @@ fn report_read_write_and_flush_failures_reach_the_caller() {
         serde_json::from_str(include_str!("fixtures/impact-summaries.json")).unwrap();
     let binding = json!({"base":"base","candidate":"candidate","candidate_tree":"tree","registry_digest":"registry","context_digest":"context"});
     let bytes = serde_json::to_vec(&json!({"base":values(),"candidate":values(),"impact":summaries["changed_model"],"binding":binding})).unwrap();
+    let readonly =
+        std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/costs.rs")).unwrap();
+    let rejected = chrono_judge_cost::report::write_report_to_fd(bytes.as_slice(), &readonly);
+    assert_eq!(
+        rejected.unwrap_err(),
+        io::Error::from_raw_os_error(9).to_string()
+    );
+
     sink.fail_write = true;
     assert_eq!(
         write_report(bytes.as_slice(), &mut sink).unwrap_err(),

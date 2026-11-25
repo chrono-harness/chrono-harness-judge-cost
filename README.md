@@ -6,13 +6,9 @@
 
 [固定来源](https://github.com/ChronoAIProject/chrono-harness/tree/5f6892dfa2f73675a84e4ebdc3b06eb83b824d6e/crates/judge-cost)
 
-在任务工作树内运行检查。原始进程输出、汇总、Verus 产物及 Cargo 临时文件随工作树过期，可长期使用的结果应在 24 小时窗口内转存。主检出作为协调者，已安装本仓工具的开发机可以在用户 crontab 中加入下列条目，把两个绝对路径替换为本机路径。定时维护会核对工作树身份、活跃租约、源码及提交保全状况，再处置已到期的工作树。
+在任务工作树内运行检查。原始进程输出、汇总、Verus 产物及 Cargo 临时文件随工作树过期，可长期使用的结果应在 24 小时窗口内转存。在主检出运行 `mise exec -- chrono-worktree maintain --host-root . --config .chrono-harness/worktree.json` 可执行一轮工作树维护。独占执行者核对身份、租约与源码保全情况，然后回收符合条件的产物。
 
-```cron
-0 * * * * cd '/absolute/path/to/chrono-harness-judge-cost' && '/absolute/path/to/mise' exec -- chrono-worktree maintain --host-root . --config .chrono-harness/worktree.json >/dev/null
-```
-
-长期主检出的原生编译使用专属的 `.chrono-harness/native-check/`。整次标准检查持有工作树租约。同一项每小时维护在取得排他租约后批量回收已登记的临时目录，包括检查中断后遗留的 Cargo 文件。需要跨期使用的报告应在下一次维护前转存。外置 `CARGO_TARGET_DIR` 由调用方维护。迁移前遗留的 `target/check.*` 需先确认所有者和使用情况，再转存或移除。
+长期主检出的原生编译使用专属的 `.chrono-harness/native-check/`。整次标准检查持有工作树租约。同一项维护在取得排他租约后批量回收已登记的临时目录，包括检查中断后遗留的 Cargo 文件。需要跨期使用的报告应在下一次维护前转存。外置 `CARGO_TARGET_DIR` 由调用方维护。迁移前遗留的 `target/check.*` 需先确认所有者和使用情况，再转存或移除。
 
 运行 `chrono-judge-cost --protocol chrono-judge/v1` 时，程序调用已安装的 `chrono-harness judge-pipeline`。runner 核对封存请求、读取宿主限额、记录日志，并调用 `chrono-judge-filemap cost-inputs-v1` 取得两端的已解释登记、完整变更范围和 Git 观察。FILEMAP 使用已安装的 registration 命令。runner 随后调用同一成本程序的 `report-v1` 生成判定与成本报告。
 
@@ -22,4 +18,4 @@
 
 报告适配器将实际 `outputs.costs.unknown` 数组交给 Verus 证明根。数组为空时返回 `pass` 和零条 finding，有一个或多个条目时返回 `warn` 和一条 `W_COST_UNKNOWN`，原因指向原报告的未知条目。runner 使用这些判定字段；mixed 通过前置结果读取 `outputs.costs` 中的两端声明和绑定。JSON 的解码、序列化和进程 I/O 位于证明边界。
 
-主检出的一次完整检查会产生 `.chrono-harness/state/preparation/` 和 `collection/` 中的报告。单独运行本仓单元时，报告写入 `cost/`。三个目录位于同一个 `.chrono-harness/state/` 下，按上方每小时维护批次回收。需要跨期使用的原件请在下一批次前转存；持有已登记读者租约时会保全。首次启用前已有的报告，由持有者核对、转存后显式接管。
+主检出的一次完整检查会产生 `.chrono-harness/state/preparation/` 和 `collection/` 中的报告。单独运行本仓单元时，报告写入 `cost/`。三个目录位于同一个 `.chrono-harness/state/` 下，在上方维护轮次中回收。需要跨期使用的原件请在下一批次前转存；持有已登记读者租约时会保全。首次启用前已有的报告，由持有者核对、转存后显式接管。

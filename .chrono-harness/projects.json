@@ -26,10 +26,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.judge-cost.rlib,dep-info=.chrono-harness/state/verify.judge-cost.rlib.d",
+            "--emit=link={operation_state}/verify.judge-cost.rlib,dep-info={operation_state}/verify.judge-cost.rlib.d",
             "crates/judge-cost/src/verified_cost.rs",
             "-o",
-            ".chrono-harness/state/verify.judge-cost.rlib",
+            "{operation_state}/verify.judge-cost.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -59,10 +59,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.judge-cost-tests.rlib,dep-info=.chrono-harness/state/verify.judge-cost-tests.rlib.d",
+            "--emit=link={operation_state}/verify.judge-cost-tests.rlib,dep-info={operation_state}/verify.judge-cost-tests.rlib.d",
             "crates/judge-cost-tests/tests/verified_cost.rs",
             "-o",
-            ".chrono-harness/state/verify.judge-cost-tests.rlib",
+            "{operation_state}/verify.judge-cost-tests.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {

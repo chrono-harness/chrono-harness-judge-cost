@@ -10,6 +10,17 @@ use vstd::string::StringExecFns;
 
 verus! {
 
+pub const MAX_REPORT_BYTES: usize = 64 * 1024 * 1024;
+
+/// The reader obtains at most one extra byte to distinguish the inclusive limit.
+pub fn check_report_size(length: usize) -> (out: Result<(), &'static str>)
+    ensures
+        out.is_ok() == (length <= 67108864),
+        out matches Err(message) ==> message@ == "E_INPUT: report input exceeds 64 MiB"@,
+{
+    if length > MAX_REPORT_BYTES { Err("E_INPUT: report input exceeds 64 MiB") } else { Ok(()) }
+}
+
 /// The RFC 6901 reference-token encoding emits one or two Unicode scalars.
 pub fn pointer_token(c: char) -> (token: [Option<char>; 2])
     ensures

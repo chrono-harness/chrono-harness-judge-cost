@@ -479,3 +479,65 @@ fn report_keys_are_the_union_of_delta_reached_owners_and_required_tests() {
         "E_IMPACT: unsupported cost input schema"
     );
 }
+
+#[test]
+fn report_read_write_and_flush_failures_reach_the_caller() {
+    use chrono_judge_cost::report::write_report;
+    use std::io::{self, Read, Write};
+
+    struct FailedRead;
+    impl Read for FailedRead {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::other("read interrupted by producer"))
+        }
+    }
+
+    #[derive(Default)]
+    struct Sink {
+        fail_write: bool,
+        bytes: Vec<u8>,
+        flushes: usize,
+    }
+    impl Write for Sink {
+        fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+            if self.fail_write {
+                return Err(io::Error::other("write refused by consumer"));
+            }
+            self.bytes.extend_from_slice(input);
+            Ok(input.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            Err(io::Error::other("consumer flush failed"))
+        }
+    }
+
+    let mut sink = Sink::default();
+    assert_eq!(
+        write_report(FailedRead, &mut sink).unwrap_err(),
+        "read interrupted by producer"
+    );
+    assert!(sink.bytes.is_empty());
+    assert_eq!(sink.flushes, 0);
+
+    let summaries: Value =
+        serde_json::from_str(include_str!("fixtures/impact-summaries.json")).unwrap();
+    let binding = json!({"base":"base","candidate":"candidate","candidate_tree":"tree","registry_digest":"registry","context_digest":"context"});
+    let bytes = serde_json::to_vec(&json!({"base":values(),"candidate":values(),"impact":summaries["changed_model"],"binding":binding})).unwrap();
+    sink.fail_write = true;
+    assert_eq!(
+        write_report(bytes.as_slice(), &mut sink).unwrap_err(),
+        "write refused by consumer"
+    );
+    assert!(sink.bytes.is_empty());
+    assert_eq!(sink.flushes, 0);
+
+    sink.fail_write = false;
+    assert_eq!(
+        write_report(bytes.as_slice(), &mut sink).unwrap_err(),
+        "consumer flush failed"
+    );
+    assert_eq!(sink.flushes, 1);
+    let report: Value = serde_json::from_slice(&sink.bytes).unwrap();
+    assert_eq!(report["outputs"]["costs"]["binding"], binding);
+}

@@ -19,6 +19,14 @@ fn expect(actual: bool)
     if !actual { panic!(); }
 }
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn cost_report_size_includes_the_last_byte() {
+    expect(policy::check_report_size(0).is_ok());
+    expect(policy::check_report_size(67108863).is_ok());
+    expect(policy::check_report_size(67108864).is_ok());
+    expect(policy::check_report_size(67108865).is_err());
+}
+
 fn expect_name(actual: &str, expected: &str)
     requires actual@ == expected@,
 {

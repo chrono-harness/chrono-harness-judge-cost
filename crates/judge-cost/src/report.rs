@@ -1,6 +1,6 @@
 //! Product input for a declared-cost report, after both producers have decoded their documents.
-use crate::verified_cost::Changed;
-use crate::{CostRegistry, FilemapImpact, produce};
+use crate::verified_cost::{Changed, MAX_REPORT_BYTES, check_report_size, report_decision};
+use crate::{CostRegistry, FilemapImpact, collect_costs};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::{Read, Write};
@@ -27,19 +27,15 @@ struct Input {
 pub fn write_report(input: impl Read, mut output: impl Write) -> Result<(), String> {
     let mut bytes = Vec::new();
     input
-        .take(64 * 1024 * 1024 + 1)
+        .take(MAX_REPORT_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
-    if bytes.len() > 64 * 1024 * 1024 {
-        return Err("E_INPUT: report input exceeds 64 MiB".into());
-    }
+    check_report_size(bytes.len())?;
     let query: Input = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    let mut costs = produce(&query.base, &query.candidate, &query.impact)?;
+    let entries = collect_costs(&query.base, &query.candidate, &query.impact)?;
+    let decision = report_decision(&entries.unknown);
+    let mut costs = entries.document(&query.impact);
     costs["binding"] = serde_json::to_value(query.binding).map_err(|error| error.to_string())?;
-    let unknown = costs["unknown"]
-        .as_array()
-        .ok_or("invalid cost unknown coordinates")?;
-    let decision = crate::verified_cost::report_decision(unknown);
     let report =
         json!({"status":decision.status,"findings":decision.findings,"outputs":{"costs":costs}});
     serde_json::to_writer(&mut output, &report).map_err(|e| e.to_string())?;

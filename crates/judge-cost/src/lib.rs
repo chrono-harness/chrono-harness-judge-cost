@@ -88,6 +88,31 @@ pub fn produce<D: ChangedFile>(
     candidate: &CostRegistry,
     impact: &FilemapImpact<D>,
 ) -> Result<Value, String> {
+    Ok(collect_costs(base, candidate, impact)?.document(impact))
+}
+
+struct CostEntries {
+    before: Map<String, Value>,
+    after: Map<String, Value>,
+    unknown: Vec<Value>,
+    removed: Vec<String>,
+}
+
+impl CostEntries {
+    fn document<D>(&self, impact: &FilemapImpact<D>) -> Value {
+        json!({"schema":COST_SCHEMA,"declared_before":self.before,"declared_after":self.after,
+            "affected_tests":impact.tests,"retired_tests":impact.retired_tests,"removed_nodes":self.removed,
+            "unknown":self.unknown,"measured":null,
+            "measurement_status":"not measured; declarations are estimates, not process measurements",
+            "aggregation":"none; member references are retained without summing resource peaks or parallel wall time"})
+    }
+}
+
+fn collect_costs<D: ChangedFile>(
+    base: &CostRegistry,
+    candidate: &CostRegistry,
+    impact: &FilemapImpact<D>,
+) -> Result<CostEntries, String> {
     let subjects = verified_cost::cost_subjects(
         &impact.schema,
         &impact.delta,
@@ -145,11 +170,10 @@ pub fn produce<D: ChangedFile>(
         before.insert(subject.clone(), a);
         after.insert(subject, b);
     }
-    Ok(
-        json!({"schema":COST_SCHEMA,"declared_before":before,"declared_after":after,
-        "affected_tests":impact.tests,"retired_tests":impact.retired_tests,"removed_nodes":removed,
-        "unknown":unknown,"measured":null,
-        "measurement_status":"not measured; declarations are estimates, not process measurements",
-        "aggregation":"none; member references are retained without summing resource peaks or parallel wall time"}),
-    )
+    Ok(CostEntries {
+        before,
+        after,
+        unknown,
+        removed,
+    })
 }

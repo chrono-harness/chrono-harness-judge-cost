@@ -373,6 +373,47 @@ fn report_retains_endpoint_row_pointers_after_sorting_and_model_escaping() {
 }
 
 #[test]
+fn model_pointers_resolve_distinct_names_in_the_original_registry() {
+    let base = known();
+    let mut candidate = base.clone();
+    let names = [
+        "",
+        "/",
+        "~",
+        "~1",
+        "~0",
+        "//",
+        "~~",
+        "~/~1",
+        "𝄞/模型~",
+        "\0",
+    ];
+    for (i, name) in names.iter().enumerate() {
+        let mut model = base["filemap"]["cost_models"]["known"].clone();
+        model["cpu_ms"] = json!(i);
+        candidate["filemap"]["cost_models"][name] = model;
+    }
+    let row = candidate["filemap"]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|f| f["path"] == "src.bin")
+        .unwrap();
+    for (i, name) in names.iter().enumerate() {
+        candidate["filemap"]["files"][row]["cost"] = json!(name);
+        let costs = report(&base, &candidate, "source_change").unwrap();
+        let source = &costs["declared_after"]["file:src.bin"]["costs"][0];
+        let pointer = source["source"]["pointer"].as_str().unwrap();
+        assert_eq!(source["reference"], *name);
+        assert_eq!(source["value"]["cpu_ms"], i);
+        assert_eq!(
+            candidate["filemap"].pointer(pointer),
+            Some(&source["value"])
+        );
+    }
+}
+
+#[test]
 fn report_keys_are_the_union_of_delta_reached_owners_and_required_tests() {
     let mut source = known();
     let fm = &mut source["filemap"];

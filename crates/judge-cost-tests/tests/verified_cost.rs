@@ -25,6 +25,29 @@ fn expect_name(actual: &str, expected: &str)
     expect(equal);
 }
 
+/// A decoder can recover every original Unicode scalar from its emitted token.
+#[cfg_attr(not(verus_keep_ghost), allow(dead_code))]
+fn pointer_token_recovers_original(character: char) {
+    let token = policy::pointer_token(character);
+    let recovered = match (token[0], token[1]) {
+        (Some('~'), Some('0')) => '~',
+        (Some('~'), Some('1')) => '/',
+        (Some(c), None) if c != '~' && c != '/' => c,
+        _ => { expect(false); return; }
+    };
+    expect(recovered == character);
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn pointer_tokens_distinguish_controls_digits_and_unicode() {
+    pointer_token_recovers_original('~');
+    pointer_token_recovers_original('/');
+    pointer_token_recovers_original('0');
+    pointer_token_recovers_original('1');
+    pointer_token_recovers_original('路');
+    pointer_token_recovers_original('\0');
+}
+
 /// Any changed path produces exactly one file object even when the path occurs twice.
 #[cfg_attr(not(verus_keep_ghost), test)]
 fn duplicate_changes_have_one_prefixed_subject()

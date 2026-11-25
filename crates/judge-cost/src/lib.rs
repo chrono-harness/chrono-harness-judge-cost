@@ -20,8 +20,10 @@ pub struct FilemapImpact<D> {
 }
 
 pub const COST_SCHEMA: &str = "chrono-costs/v1";
-fn escape(s: &str) -> String {
-    s.replace('~', "~0").replace('/', "~1")
+fn model_pointer(id: &str) -> String {
+    let mut pointer = String::from("/cost_models/");
+    pointer.extend(id.chars().flat_map(verified_cost::pointer_token).flatten());
+    pointer
 }
 fn reference(r: &CostRegistry, id: &str, member: &str, pointer: String) -> Result<Value, String> {
     let model = r
@@ -31,7 +33,7 @@ fn reference(r: &CostRegistry, id: &str, member: &str, pointer: String) -> Resul
         .ok_or_else(|| format!("E_COST_REFERENCE: missing cost model {id} for {member}"))?;
     let registry = &r.path;
     Ok(json!({"reference":id,"member":member,"value":model,
-        "source":{"registry":registry,"pointer":format!("/cost_models/{}",escape(id))},
+        "source":{"registry":registry,"pointer":model_pointer(id)},
         "declaration":{"registry":registry,"pointer":pointer}}))
 }
 fn file_cost(r: &CostRegistry, index: usize, file: &CostFile) -> Result<Value, String> {

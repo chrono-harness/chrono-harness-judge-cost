@@ -6,6 +6,8 @@ publish = false
 autotests = false
 
 [dev-dependencies]
+sha2 = "0.10"
+serde_yaml = { package = "serde_yaml_ng", version = "=0.10.0" }
 verus_builtin_macros = "=0.0.0-2026-04-20-1748"
 vstd = "=0.0.0-2026-04-20-1748"
 chrono-judge-cost = { path = "../judge-cost" }

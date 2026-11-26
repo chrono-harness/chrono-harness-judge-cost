@@ -8,6 +8,10 @@ use vstd::contrib::exec_spec::ExecSpecEq;
 use vstd::prelude::*;
 use vstd::string::StringExecFns;
 
+#[cfg(verus_keep_ghost)]
+#[path = "lib.rs"]
+pub mod cost_model;
+
 verus! {
 
 pub const MAX_REPORT_BYTES: usize = 64 * 1024 * 1024;
@@ -459,19 +463,20 @@ pub struct UnknownMember<'a, V> {
 /// The publication decision and the published names use one coordinate list.
 pub fn unknown_member<'a, V>(
     endpoint: Endpoint, node: &'a str, member: &'a V, reference: &'a V, source: &'a V, basis: &'a V,
-    cpu: bool, wall: bool, peak: bool, io: bool,
+    missing: (bool, bool, bool, bool),
 ) -> (out: Option<UnknownMember<'a, V>>)
-    ensures out.is_some() == (cpu || wall || peak || io),
+    ensures out.is_some() == (missing.0 || missing.1 || missing.2 || missing.3),
         out matches Some(entry) ==> {
             &&& entry.endpoint@ == match endpoint { Endpoint::Base => "base"@, Endpoint::Candidate => "candidate"@ }
             &&& entry.node == node && entry.member == member && entry.reference == reference
             &&& entry.source == source && entry.reason == basis
-            &&& coordinate_names(entry.coordinates@) == missing_names(cpu, wall, peak, io)
-            &&& entry.coordinates.len() == missing_names(cpu, wall, peak, io).len()
+            &&& coordinate_names(entry.coordinates@) == missing_names(missing.0, missing.1, missing.2, missing.3)
+            &&& entry.coordinates.len() == missing_names(missing.0, missing.1, missing.2, missing.3).len()
             &&& forall|i:int| 0 <= i < entry.coordinates.len() ==> (#[trigger] entry.coordinates@[i])@
-                == missing_names(cpu, wall, peak, io)[i]
+                == missing_names(missing.0, missing.1, missing.2, missing.3)[i]
         },
 {
+    let (cpu, wall, peak, io) = missing;
     let coordinates = missing_coordinate_names(cpu, wall, peak, io);
     if coordinates.is_empty() { return None; }
     Some(UnknownMember {endpoint: endpoint.label(), node, member, reference, source, coordinates, reason: basis})

@@ -1,8 +1,8 @@
 //! Product input for a declared-cost report, after both producers have decoded their documents.
-use crate::verified_cost::{Changed, MAX_REPORT_BYTES, check_report_size, report_decision};
+use crate::verified_cost::{Changed, MAX_REPORT_BYTES, check_report_size};
 use crate::{CostRegistry, FilemapImpact, collect_costs};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::os::fd::AsFd;
@@ -44,11 +44,10 @@ pub fn write_report(input: impl Read, mut output: impl Write) -> Result<(), Stri
     check_report_size(bytes.len())?;
     let query: Input = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let entries = collect_costs(&query.base, &query.candidate, &query.impact)?;
-    let decision = report_decision(&entries.unknown);
-    let mut costs = entries.document(&query.impact);
-    costs["binding"] = serde_json::to_value(query.binding).map_err(|error| error.to_string())?;
     let report =
-        json!({"status":decision.status,"findings":decision.findings,"outputs":{"costs":costs}});
-    serde_json::to_writer(&mut output, &report).map_err(|e| e.to_string())?;
+        crate::verified_cost::report(crate::document(&entries, &query.impact), query.binding);
+    // Value preserves the published JSON object's canonical key order.
+    let value = serde_json::to_value(report).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut output, &value).map_err(|e| e.to_string())?;
     output.flush().map_err(|e| e.to_string())
 }

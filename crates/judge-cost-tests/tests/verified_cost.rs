@@ -11,7 +11,36 @@ use vstd::string::StringExecFns;
 #[cfg(verus_keep_ghost)]
 use vstd::vpanic as panic;
 
+#[cfg(not(verus_keep_ghost))]
+use chrono_judge_cost::model_fields;
+#[cfg(verus_keep_ghost)]
+use policy::cost_model::model_fields;
+
 verus! {
+/// Each missing field must set exactly its own report coordinate.
+fn check_model_field(key: &'static str) {
+    let read = |name: &'static str| -> (absent: bool)
+        ensures absent == (name@ == key@),
+    { <&str>::exec_eq(name, key) };
+    let mask = model_fields(read);
+    expect(mask.0 == <&str>::exec_eq(key, "cpu_ms"));
+    expect(mask.1 == <&str>::exec_eq(key, "wall_ms"));
+    expect(mask.2 == <&str>::exec_eq(key, "peak_rss_bytes"));
+    expect(mask.3 == <&str>::exec_eq(key, "io_bytes"));
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn each_model_key_reaches_its_own_coordinate() {
+    check_model_field("cpu_ms");
+    check_model_field("wall_ms");
+    check_model_field("peak_rss_bytes");
+    check_model_field("io_bytes");
+    check_model_field("other");
+    let all = model_fields(|_name: &'static str| -> (absent: bool)
+        ensures absent, { true });
+    expect(all.0 && all.1 && all.2 && all.3);
+}
+
 #[cfg_attr(not(verus_keep_ghost),test)]
 fn dispatch_and_pipeline_keep_native_tail_and_child_identity() {
     expect(policy::direct_report(Some("report-v1"),1));
@@ -254,7 +283,7 @@ fn report_publishes_one_warning_for_one_or_more_entries() {
 fn missing_member_keeps_its_endpoint_original_evidence_and_coordinate_order() {
     let member=3u8; let reference=5u8; let source=7u8; let basis=9u8;
     let entry=policy::unknown_member(policy::Endpoint::Candidate,"file:README.md",&member,&reference,&source,&basis,
-        true,false,true,false).unwrap();
+        (true,false,true,false)).unwrap();
     expect_name(entry.endpoint,"candidate"); expect_name(entry.node,"file:README.md");
     expect(*entry.member==3 && *entry.reference==5 && *entry.source==7 && *entry.reason==9);
     expect(entry.coordinates.len()==2);
@@ -265,7 +294,7 @@ fn missing_member_keeps_its_endpoint_original_evidence_and_coordinate_order() {
     proof {assert(policy::coordinate_names(entry.coordinates@).len()==entry.coordinates.len());}
     expect(entry.coordinates.len()==4);
     let known=policy::unknown_member(policy::Endpoint::Base,"file:README.md",&member,&reference,&source,&basis,
-        false,false,false,false);
+        (false,false,false,false));
     expect(known.is_none());
 }
 
@@ -301,7 +330,7 @@ fn missing_names_preserve_each_coordinate_and_fixed_order() {
 #[cfg(verus_keep_ghost)]
 fn presence_and_all_coordinates_follow_the_observed_mask(cpu:bool,wall:bool,peak:bool,io:bool) {
     let v=0u8;
-    let out=policy::unknown_member(policy::Endpoint::Base,"test:t",&v,&v,&v,&v,cpu,wall,peak,io);
+    let out=policy::unknown_member(policy::Endpoint::Base,"test:t",&v,&v,&v,&v,(cpu,wall,peak,io));
     assert(out.is_some()==(cpu || wall || peak || io));
     if let Some(entry)=out {
         assert(policy::coordinate_names(entry.coordinates@) == (

@@ -271,28 +271,6 @@
       }
     },
     {
-      "path": ".github/workflows/dependabot-auto-merge.yml",
-      "owner": "host",
-      "surface": "product",
-      "cost": "unmeasured",
-      "edges": [],
-      "verification": {
-        "role": "data",
-        "roots": []
-      }
-    },
-    {
-      "path": ".github/dependabot.yml",
-      "owner": "host",
-      "surface": "product",
-      "cost": "unmeasured",
-      "edges": [],
-      "verification": {
-        "role": "data",
-        "roots": []
-      }
-    },
-    {
       "path": ".github/ISSUE_TEMPLATE/bug.yml",
       "owner": "host",
       "surface": "product",
@@ -348,6 +326,17 @@
       }
     },
     {
+      "path": ".github/dependabot.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
       "path": ".github/roadmap.cjs",
       "owner": "host",
       "surface": "product",
@@ -355,11 +344,20 @@
       "edges": []
     },
     {
-      "path": ".github/workflows/issue-roadmap.yml",
+      "path": ".github/workflows/actions.lock",
       "owner": "host",
       "surface": "product",
       "cost": "unmeasured",
-      "edges": []
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:judge-cost-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": ".github/workflows/check.yml",
@@ -376,6 +374,24 @@
         "role": "data",
         "roots": []
       }
+    },
+    {
+      "path": ".github/workflows/dependabot-auto-merge.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".github/workflows/issue-roadmap.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
     },
     {
       "path": ".github/workflows/release.yml",

@@ -16,6 +16,9 @@ use chrono_judge_cost::model_fields;
 #[cfg(verus_keep_ghost)]
 use policy::cost_model::model_fields;
 
+#[path = "../../../.chrono-harness/ci/roadmap.rs"]
+mod roadmap;
+
 verus! {
 /// Each missing field must set exactly its own report coordinate.
 fn check_model_field(key: &'static str) {

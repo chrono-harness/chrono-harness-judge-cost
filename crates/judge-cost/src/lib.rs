@@ -135,35 +135,31 @@ fn collect_costs<D: ChangedFile>(
             &mut removed,
         )
         .map_err(|error| format!("{}{}", error.message, error.subject))?;
-        for (endpoint, value) in [("base", &a), ("candidate", &b)] {
+        for (endpoint, value) in [
+            (verified_cost::Endpoint::Base, &a),
+            (verified_cost::Endpoint::Candidate, &b),
+        ] {
             let Some(costs) = value["costs"].as_array() else {
                 continue;
             };
             if costs.is_empty() {
-                unknown.push(json!({"endpoint":endpoint,"node":subject,"reference":null,
-                    "coordinates":verified_cost::missing_coordinate_names(true, true, true, true),
-                    "reason":"no declared member cost references"}));
+                unknown.push(json!(verified_cost::no_members(endpoint, &subject)));
             }
             for cost in costs {
-                let cpu_missing = cost["value"]["cpu_ms"].is_null();
-                let wall_missing = cost["value"]["wall_ms"].is_null();
-                let peak_rss_missing = cost["value"]["peak_rss_bytes"].is_null();
-                let io_missing = cost["value"]["io_bytes"].is_null();
-                let coordinates = verified_cost::missing_coordinate_names(
-                    cpu_missing,
-                    wall_missing,
-                    peak_rss_missing,
-                    io_missing,
-                );
-                if verified_cost::has_unknown_coordinate(
-                    cpu_missing,
-                    wall_missing,
-                    peak_rss_missing,
-                    io_missing,
+                let model = &cost["value"];
+                if let Some(entry) = verified_cost::unknown_member(
+                    endpoint,
+                    &subject,
+                    &cost["member"],
+                    &cost["reference"],
+                    &cost["source"],
+                    &model["basis"],
+                    model["cpu_ms"].is_null(),
+                    model["wall_ms"].is_null(),
+                    model["peak_rss_bytes"].is_null(),
+                    model["io_bytes"].is_null(),
                 ) {
-                    unknown.push(json!({"endpoint":endpoint,"node":subject,"member":cost["member"],
-                        "reference":cost["reference"],"source":cost["source"],"coordinates":coordinates,
-                        "reason":cost["value"]["basis"]}));
+                    unknown.push(json!(entry));
                 }
             }
         }

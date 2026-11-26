@@ -384,31 +384,6 @@ pub fn report_decision<T>(unknown: &[T]) -> (decision: ReportDecision)
     }
 }
 
-/// A cost declaration is unknown when any of its four coordinates is absent.
-pub open spec fn unknown_coordinate(
-    cpu_missing: bool,
-    wall_missing: bool,
-    peak_rss_missing: bool,
-    io_missing: bool,
-) -> bool {
-    cpu_missing || wall_missing || peak_rss_missing || io_missing
-}
-
-/// The production judge uses this result to emit the warning and preserve the
-/// exact missing coordinate list in its JSON adapter.
-pub fn has_unknown_coordinate(
-    cpu_missing: bool,
-    wall_missing: bool,
-    peak_rss_missing: bool,
-    io_missing: bool,
-) -> (unknown: bool)
-    ensures unknown == unknown_coordinate(
-        cpu_missing, wall_missing, peak_rss_missing, io_missing,
-    ),
-{
-    cpu_missing || wall_missing || peak_rss_missing || io_missing
-}
-
 pub open spec fn coordinate_names(names: Seq<&str>) -> Seq<Seq<char>> {
     names.map(|i: int, name: &str| name@)
 }
@@ -435,6 +410,71 @@ pub fn missing_coordinate_names(cpu: bool, wall: bool, peak: bool, io: bool)
     if io { names.push("io_bytes"); }
     assert(coordinate_names(names@) =~= missing_names(cpu, wall, peak, io));
     names
+}
+
+#[derive(Clone, Copy)]
+pub enum Endpoint { Base, Candidate }
+
+impl Endpoint {
+    fn label(self) -> (name: &'static str)
+        ensures name@ == match self { Endpoint::Base => "base"@, Endpoint::Candidate => "candidate"@ },
+    {
+        match self { Endpoint::Base => "base", Endpoint::Candidate => "candidate" }
+    }
+}
+
+/// A registered project or script with zero members has no model reference.
+#[cfg_attr(not(verus_keep_ghost), derive(serde::Serialize))]
+pub struct NoMembers<'a> {
+    pub endpoint: &'static str,
+    pub node: &'a str,
+    pub reference: (),
+    pub coordinates: Vec<&'static str>,
+    pub reason: &'static str,
+}
+
+pub fn no_members(endpoint: Endpoint, node: &str) -> (out: NoMembers<'_>)
+    ensures out.endpoint@ == match endpoint { Endpoint::Base => "base"@, Endpoint::Candidate => "candidate"@ },
+        out.node == node, out.reason@ == "no declared member cost references"@,
+        coordinate_names(out.coordinates@) == missing_names(true, true, true, true),
+{
+    NoMembers {
+        endpoint: endpoint.label(), node, reference: (),
+        coordinates: missing_coordinate_names(true, true, true, true),
+        reason: "no declared member cost references",
+    }
+}
+
+#[cfg_attr(not(verus_keep_ghost), derive(serde::Serialize))]
+pub struct UnknownMember<'a, V> {
+    pub endpoint: &'static str,
+    pub node: &'a str,
+    pub member: &'a V,
+    pub reference: &'a V,
+    pub source: &'a V,
+    pub coordinates: Vec<&'static str>,
+    pub reason: &'a V,
+}
+
+/// The publication decision and the published names use one coordinate list.
+pub fn unknown_member<'a, V>(
+    endpoint: Endpoint, node: &'a str, member: &'a V, reference: &'a V, source: &'a V, basis: &'a V,
+    cpu: bool, wall: bool, peak: bool, io: bool,
+) -> (out: Option<UnknownMember<'a, V>>)
+    ensures out.is_some() == (cpu || wall || peak || io),
+        out matches Some(entry) ==> {
+            &&& entry.endpoint@ == match endpoint { Endpoint::Base => "base"@, Endpoint::Candidate => "candidate"@ }
+            &&& entry.node == node && entry.member == member && entry.reference == reference
+            &&& entry.source == source && entry.reason == basis
+            &&& coordinate_names(entry.coordinates@) == missing_names(cpu, wall, peak, io)
+            &&& entry.coordinates.len() == missing_names(cpu, wall, peak, io).len()
+            &&& forall|i:int| 0 <= i < entry.coordinates.len() ==> (#[trigger] entry.coordinates@[i])@
+                == missing_names(cpu, wall, peak, io)[i]
+        },
+{
+    let coordinates = missing_coordinate_names(cpu, wall, peak, io);
+    if coordinates.is_empty() { return None; }
+    Some(UnknownMember {endpoint: endpoint.label(), node, member, reference, source, coordinates, reason: basis})
 }
 
 #[cfg_attr(not(verus_keep_ghost), derive(Debug))]

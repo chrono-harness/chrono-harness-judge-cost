@@ -179,27 +179,22 @@ fn report_publishes_one_warning_for_one_or_more_entries() {
 }
 
 #[cfg_attr(not(verus_keep_ghost), test)]
-fn no_missing_coordinate_is_known() {
-    let known = policy::has_unknown_coordinate(false, false, false, false);
-    expect(!known);
-}
-
-#[cfg_attr(not(verus_keep_ghost), test)]
-fn each_coordinate_independently_makes_the_declaration_unknown() {
-    let cpu = policy::has_unknown_coordinate(true, false, false, false);
-    let wall = policy::has_unknown_coordinate(false, true, false, false);
-    let peak_rss = policy::has_unknown_coordinate(false, false, true, false);
-    let io = policy::has_unknown_coordinate(false, false, false, true);
-    expect(cpu && wall && peak_rss && io);
-}
-
-#[cfg_attr(not(verus_keep_ghost), test)]
-fn combinations_are_monotone_in_missing_coordinates() {
-    let none = policy::has_unknown_coordinate(false, false, false, false);
-    let cpu_wall = policy::has_unknown_coordinate(true, true, false, false);
-    let peak_io = policy::has_unknown_coordinate(false, false, true, true);
-    let all = policy::has_unknown_coordinate(true, true, true, true);
-    expect(!none && cpu_wall && peak_io && all);
+fn missing_member_keeps_its_endpoint_original_evidence_and_coordinate_order() {
+    let member=3u8; let reference=5u8; let source=7u8; let basis=9u8;
+    let entry=policy::unknown_member(policy::Endpoint::Candidate,"file:README.md",&member,&reference,&source,&basis,
+        true,false,true,false).unwrap();
+    expect_name(entry.endpoint,"candidate"); expect_name(entry.node,"file:README.md");
+    expect(*entry.member==3 && *entry.reference==5 && *entry.source==7 && *entry.reason==9);
+    expect(entry.coordinates.len()==2);
+    expect_name(entry.coordinates[0],"cpu_ms"); expect_name(entry.coordinates[1],"peak_rss_bytes");
+    let entry=policy::no_members(policy::Endpoint::Base,"project:a");
+    expect_name(entry.endpoint,"base"); expect_name(entry.node,"project:a");
+    expect_name(entry.reason,"no declared member cost references");
+    proof {assert(policy::coordinate_names(entry.coordinates@).len()==entry.coordinates.len());}
+    expect(entry.coordinates.len()==4);
+    let known=policy::unknown_member(policy::Endpoint::Base,"file:README.md",&member,&reference,&source,&basis,
+        false,false,false,false);
+    expect(known.is_none());
 }
 
 #[cfg_attr(not(verus_keep_ghost), test)]
@@ -229,6 +224,20 @@ fn missing_names_preserve_each_coordinate_and_fixed_order() {
     expect_name(all[1], "wall_ms");
     expect_name(all[2], "peak_rss_bytes");
     expect_name(all[3], "io_bytes");
+}
+
+#[cfg(verus_keep_ghost)]
+fn presence_and_all_coordinates_follow_the_observed_mask(cpu:bool,wall:bool,peak:bool,io:bool) {
+    let v=0u8;
+    let out=policy::unknown_member(policy::Endpoint::Base,"test:t",&v,&v,&v,&v,cpu,wall,peak,io);
+    assert(out.is_some()==(cpu || wall || peak || io));
+    if let Some(entry)=out {
+        assert(policy::coordinate_names(entry.coordinates@) == (
+            (if cpu {seq!["cpu_ms"@]} else {Seq::empty()}) +
+            (if wall {seq!["wall_ms"@]} else {Seq::empty()}) +
+            (if peak {seq!["peak_rss_bytes"@]} else {Seq::empty()}) +
+            (if io {seq!["io_bytes"@]} else {Seq::empty()})));
+    }
 }
 
 #[cfg_attr(not(verus_keep_ghost), test)]

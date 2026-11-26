@@ -12,6 +12,78 @@ use vstd::string::StringExecFns;
 use vstd::vpanic as panic;
 
 verus! {
+#[cfg_attr(not(verus_keep_ghost),test)]
+fn dispatch_and_pipeline_keep_native_tail_and_child_identity() {
+    expect(policy::direct_report(Some("report-v1"),1));
+    expect(!policy::direct_report(Some("report-v1"),2));
+    expect(!policy::direct_report(None,1));
+    proof {reveal_strlit("--version");reveal_strlit("report-v1");assert("--version"@[0]!= "report-v1"@[0]);}
+    expect(!policy::direct_report(Some("--version"),1));
+    let path=7u8;let argv=[0x80u8,0xffu8];
+    let invocation=policy::invocation(&path,"1",&argv);
+    expect_name(invocation.program,"chrono-harness");
+    match &invocation.prefix[0] {policy::Arg::Text(v)=>expect_name(v,"judge-pipeline"),_=>expect(false)}
+    match &invocation.prefix[1] {policy::Arg::Text(v)=>expect_name(v,"chrono-judge-cost"),_=>expect(false)}
+    match &invocation.prefix[2] {policy::Arg::Text(v)=>expect_name(v,"1"),_=>expect(false)}
+    match &invocation.prefix[3] {policy::Arg::Text(v)=>expect_name(v,"chrono-judge-filemap"),_=>expect(false)}
+    match &invocation.prefix[4] {policy::Arg::Text(v)=>expect_name(v,"cost-inputs-v1"),_=>expect(false)}
+    match &invocation.prefix[5] {policy::Arg::Path(v)=>expect(**v==7),_=>expect(false)}
+    match &invocation.prefix[6] {policy::Arg::Text(v)=>expect_name(v,"report-v1"),_=>expect(false)}
+    expect(invocation.forwarded.len()==2 && invocation.forwarded[0]==0x80 && invocation.forwarded[1]==0xff);
+    expect(matches!(policy::exit_report(Err::<(),u8>(5)),(2,Some(5))));
+}
+
+#[cfg_attr(not(verus_keep_ghost),test)]
+fn copied_reports_keep_both_declarations_test_lists_original_sources_and_binding() {
+    let a=4u8;let b=9u8;
+    let affected=vec![String::from_str("new")];
+    let retired=vec![String::from_str("old")];
+    let document=policy::document(&a,&b,&affected,&retired,&[],&[1u8]);
+    let report=policy::report(document,13u8);
+    expect_name(report.status,"warn");expect(report.outputs.costs.binding==13);
+    let d=&report.outputs.costs.document;
+    expect(*d.declared_before==4 && *d.declared_after==9);
+    expect_name(d.affected_tests[0].as_str(),"new");expect_name(d.retired_tests[0].as_str(),"old");
+    expect_name(d.schema,"chrono-costs/v1");expect(d.unknown.len()==1 && d.unknown[0]==1);
+    let r=policy::model_reference(Some(&b),"id","member","fm",String::from_str("/source"),String::from_str("/row")).unwrap();
+    expect_name(r.member,"member");expect_name(r.reference,"id");expect(*r.value==9);
+    expect_name(r.source.pointer.as_str(),"/source");expect_name(r.declaration.pointer.as_str(),"/row");
+    expect_name(r.source.registry,"fm");expect_name(r.declaration.registry,"fm");
+}
+
+#[cfg_attr(not(verus_keep_ghost),test)]
+fn original_endpoint_order_and_memberless_state_are_distinct() {
+    let old=2u8;let new=3u8;
+    let render=|x:&u8|->(v:Result<u8,u8>) ensures v==Ok::<u8,u8>(*x), {Ok(*x)};
+    expect(matches!(policy::endpoints(&old,&new,render),Ok((2,3))));
+    let side=|side:policy::Endpoint,n:&u8|->(v:Vec<u8>) ensures v.len()==1 && v@[0]==(if side is Base {*n}else{9u8}), {
+        match side {policy::Endpoint::Base=>vec![*n],policy::Endpoint::Candidate=>vec![9u8]}
+    };
+    let both=policy::ordered_sides(&old,&new,side);
+    proof { let (a,b)=choose|a:Vec<u8>,b:Vec<u8>| #[trigger] side.ensures((policy::Endpoint::Base,&old),a)
+        && #[trigger] side.ensures((policy::Endpoint::Candidate,&new),b) && both@==a@+b@;
+        assert(both@ =~= seq![2u8,9u8]); }
+    expect(both.len()==2 && both[0]==2 && both[1]==9);
+    let visit=|a:&u8|->(item:Option<u8>) ensures item==Some(*a),{Some(*a)};
+    let missing=||->(x:u8) ensures x==5, {5u8};
+    expect(policy::unknown_entries(None::<&[u8]>,visit,missing).len()==0);
+    let empty:[u8;0]=[];let one=policy::unknown_entries(Some(&empty),visit,missing);
+    expect(one.len()==1 && one[0]==5);
+}
+
+#[cfg_attr(not(verus_keep_ghost),test)]
+fn registered_test_missing_row_and_unregistered_owner_have_different_results() {
+    let files:[policy::CostFile;0]=[];let tests:[policy::TestCost;0]=[];
+    expect(matches!(policy::declaration(&files,&tests,policy::CostKind::Test,"t",true),policy::Selection::MissingTest));
+    expect(matches!(policy::declaration(&files,&tests,policy::CostKind::Test,"t",false),policy::Selection::Missing));
+    expect(matches!(policy::declaration(&files,&tests,policy::CostKind::File,"f",true),policy::Selection::Missing));
+    expect(matches!(policy::declaration(&files,&tests,policy::CostKind::Project,"p",false),policy::Selection::Missing));
+    match policy::declaration(&files,&tests,policy::CostKind::Script,"s",true) {
+        policy::Selection::Owner(kind,rows)=>{expect_name(kind,"script");expect(rows.len()==0);}
+        _=>expect(false),
+    }
+}
+
 
 fn expect(actual: bool)
     requires actual,

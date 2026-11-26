@@ -504,5 +504,276 @@ pub fn record_subject_presence(
     if before && !after { removed.push(subject); }
     Ok(())
 }
+pub fn direct_report(name: Option<&str>, count: usize) -> (chosen: bool)
+    ensures chosen == (count == 1 && (name matches Some(s) && s@ == "report-v1"@)),
+{
+    count == 1 && match name { Some(s) => <&str>::exec_eq(s, "report-v1"), None => false }
+}
+pub enum Arg<'a, P> { Text(&'a str), Path(&'a P) }
+pub struct Invocation<'a,P,A> {
+    pub program: &'static str, pub prefix: [Arg<'a,P>;7], pub forwarded: &'a [A],
+}
+pub fn invocation<'a,P,A>(executable: &'a P, version: &'a str, args: &'a [A]) -> (out: Invocation<'a,P,A>)
+    ensures out.program@=="chrono-harness"@ && out.forwarded==args,
+        out.prefix[0] matches Arg::Text(s) && s@=="judge-pipeline"@,
+        out.prefix[1] matches Arg::Text(s) && s@=="chrono-judge-cost"@,
+        out.prefix[2] matches Arg::Text(s) && s==version,
+        out.prefix[3] matches Arg::Text(s) && s@=="chrono-judge-filemap"@,
+        out.prefix[4] matches Arg::Text(s) && s@=="cost-inputs-v1"@,
+        out.prefix[5] matches Arg::Path(p) && p==executable,
+        out.prefix[6] matches Arg::Text(s) && s@=="report-v1"@,
+{
+    Invocation { program:"chrono-harness",prefix:[
+        Arg::Text("judge-pipeline"),Arg::Text("chrono-judge-cost"),Arg::Text(version),
+        Arg::Text("chrono-judge-filemap"),Arg::Text("cost-inputs-v1"),Arg::Path(executable),Arg::Text("report-v1")
+    ],forwarded:args}
+}
+pub fn delegation_error<P,E,L,X>(locate:L,execute:X)->(out:(u8,&'static str,E))
+    where L:FnOnce()->Result<P,E>,X:FnOnce(P)->E,
+    requires locate.requires(()),forall|p:P| execute.requires((p,)),
+    ensures out.0==2 && ((locate.ensures((),Err::<P,E>(out.2)) && out.1@=="chrono-judge-cost"@)
+        || (exists|p:P| #[trigger] locate.ensures((),Ok::<P,E>(p)) && execute.ensures((p,),out.2) && out.1@=="chrono-harness"@)),
+{
+    match locate() {Err(e)=>(2,"chrono-judge-cost",e),Ok(p)=>(2,"chrono-harness",execute(p))}
+}
+pub fn exit_report<E>(result:Result<(),E>)->(out:(u8,Option<E>))
+    ensures match result {Ok(())=>out==(0u8,None::<E>),Err(e)=>out==(2u8,Some(e))},
+{ match result {Ok(())=>(0,None),Err(e)=>(2,Some(e))} }
+
+#[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
+pub struct Location<'a> {pub registry:&'a str,pub pointer:String}
+
+#[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
+pub struct ModelReference<'a,V> {
+    pub reference:&'a str,pub member:&'a str,pub value:&'a V,pub source:Location<'a>,pub declaration:Location<'a>,
+}
+pub fn model_reference<'a,V>(model:Option<&'a V>,id:&'a str,member:&'a str,registry:&'a str,source:String,declaration:String)
+    ->(out:Option<ModelReference<'a,V>>)
+    ensures out.is_some()==model.is_some(), out matches Some(r) ==> Some(r.value)==model
+        && r.reference==id && r.member==member && r.source.registry==registry && r.declaration.registry==registry
+        && r.source.pointer==source && r.declaration.pointer==declaration,
+{
+    match model {None=>None,Some(value)=>Some(ModelReference {
+        reference:id,member,value,source:Location{registry,pointer:source},declaration:Location{registry,pointer:declaration}
+    })}
+}
+
+pub enum Selection { Missing, MissingTest, File(usize), Test(usize), Owner(&'static str,Vec<usize>) }
+pub fn declaration(files:&[CostFile], tests:&[TestCost],kind:CostKind,id:&str,registered:bool)->(out:Selection)
+    ensures match kind {
+        CostKind::File => match out {
+            Selection::Missing=>forall|i:int| 0<=i<files.len() ==> (#[trigger] files@[i]).path@!=id@,
+            Selection::File(i)=> i<files.len() && files@[i as int].path@==id@ && forall|j:int| 0<=j<i ==> (#[trigger] files@[j]).path@!=id@,
+            _=>false,
+        },
+        CostKind::Test => if !registered {out is Missing} else {match out {
+            Selection::MissingTest=>forall|i:int| 0<=i<tests.len() ==> (#[trigger] tests@[i]).test@!=id@,
+            Selection::Test(i)=>i<tests.len() && tests@[i as int].test@==id@ && forall|j:int| 0<=j<i ==> (#[trigger] tests@[j]).test@!=id@,
+            _=>false,
+        }},
+        _=>if !registered {out is Missing} else {out matches Selection::Owner(label,rows)
+            && label@==(if kind is Project {"project"@} else {"script"@}) && rows@==owned_rows(files@,id@,files.len() as nat)},
+    },
+{
+    match kind {
+        CostKind::File=>match first_declaration(files,id) {Some(i)=>Selection::File(i),None=>Selection::Missing},
+        CostKind::Test=>if !registered {Selection::Missing} else {match first_declaration(tests,id) {Some(i)=>Selection::Test(i),None=>Selection::MissingTest}},
+        CostKind::Project=>if registered {Selection::Owner("project",owner_members(files,id))} else {Selection::Missing},
+        CostKind::Script=>if registered {Selection::Owner("script",owner_members(files,id))} else {Selection::Missing},
+    }
+}
+
+pub fn endpoints<'a,T,E,R,F>(base:&'a R,candidate:&'a R,entry:F)->(out:Result<(T,T),E>)
+    where F:Fn(&'a R)->Result<T,E>,
+    requires entry.requires((base,)),entry.requires((candidate,)),
+    ensures match out {
+        Ok((a,b))=>entry.ensures((base,),Ok::<T,E>(a)) && entry.ensures((candidate,),Ok::<T,E>(b)),
+        Err(e)=>entry.ensures((base,),Err::<T,E>(e)) ||
+            ((exists|a:T| #[trigger] entry.ensures((base,),Ok::<T,E>(a))) && entry.ensures((candidate,),Err::<T,E>(e))),
+    },
+{
+    let a=entry(base)?;let b=entry(candidate)?;Ok((a,b))
+}
+#[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
+pub struct CostDocument<'a,M,U> {
+    pub schema:&'static str, pub declared_before:&'a M,pub declared_after:&'a M,
+    pub affected_tests:&'a [String],pub retired_tests:&'a [String],pub removed_nodes:&'a [String],
+    pub unknown:&'a [U],pub measured:(),pub measurement_status:&'static str,pub aggregation:&'static str,
+}
+pub const COST_SCHEMA:&'static str="chrono-costs/v1";
+pub fn document<'a,M,U>(before:&'a M,after:&'a M,affected:&'a [String],retired:&'a [String],removed:&'a [String],unknown:&'a [U])
+    ->(out:CostDocument<'a,M,U>)
+    ensures out.schema@=="chrono-costs/v1"@ && out.declared_before==before && out.declared_after==after
+        && out.affected_tests==affected && out.retired_tests==retired && out.removed_nodes==removed && out.unknown==unknown
+        && out.measurement_status@=="not measured; declarations are estimates, not process measurements"@
+        && out.aggregation@=="none; member references are retained without summing resource peaks or parallel wall time"@,
+{
+    CostDocument { schema:COST_SCHEMA,declared_before:before,declared_after:after,affected_tests:affected,retired_tests:retired,
+        removed_nodes:removed,unknown,measured:(),measurement_status:"not measured; declarations are estimates, not process measurements",
+        aggregation:"none; member references are retained without summing resource peaks or parallel wall time" }
+}
+
+#[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
+pub struct Bound<'a,M,U,B> {
+    #[cfg_attr(not(verus_keep_ghost),serde(flatten))]
+    pub document:CostDocument<'a,M,U>,pub binding:B,
+}
+#[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
+pub struct Outputs<'a,M,U,B> {pub costs:Bound<'a,M,U,B>}
+#[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
+pub struct Report<'a,M,U,B> {
+    pub status:&'static str,pub findings:Vec<CostFinding>,pub outputs:Outputs<'a,M,U,B>,
+}
+pub fn report<'a,M,U,B>(document:CostDocument<'a,M,U>,binding:B)->(out:Report<'a,M,U,B>)
+    ensures out.outputs.costs.document==document && out.outputs.costs.binding==binding,
+        out.status@==if document.unknown.len()==0 {"pass"@}else{"warn"@},
+        out.findings.len()==if document.unknown.len()==0 {0usize}else{1usize},
+        document.unknown.len()>0 ==> {
+            let finding=out.findings@[0];
+            &&& finding.code@=="W_COST_UNKNOWN"@ && finding.level@=="warning"@
+            &&& finding.message@=="Affected declared costs contain unknown coordinates; see costs.unknown"@
+            &&& finding.delta_refs@[0]@=="/impact"@ && finding.causes@[0]@=="/outputs/costs/unknown"@
+        },
+{
+    let decision=report_decision(document.unknown);
+    Report {status:decision.status,findings:decision.findings,outputs:Outputs{costs:Bound{document,binding}}}
+}
+pub open spec fn pointer_suffix(chars:Seq<char>,n:int)->Seq<char>
+    decreases n,
+{
+    if n<=0 {Seq::empty()} else {let prev=pointer_suffix(chars,n-1);match chars[n-1] {
+        '~'=>prev.push('~').push('0'),'/'=>prev.push('~').push('1'),c=>prev.push(c),
+    }}
+}
+
+pub fn escaped_model_token(key:&str)->(out:Vec<char>)
+    ensures out@==pointer_suffix(key@,key@.len() as int),
+{
+    let mut output:Vec<char>=Vec::new();let mut chars=key.chars();
+    loop
+        invariant chars@.1==key@,0<=chars@.0<=key@.len(),output@==pointer_suffix(key@,chars@.0),
+        ensures output@==pointer_suffix(key@,key@.len() as int),
+        decreases key@.len()-chars@.0,
+    {
+        let ghost previous=chars@.0;
+        match chars.next(){
+            None=>break,
+            Some(c)=>{
+                let token=pointer_token(c);
+                if let Some(first)=token[0] {output.push(first);}
+                if let Some(extra)=token[1] {output.push(extra);}
+                assert(key@[previous]==c);
+            }
+        }
+    }
+    output
+}
+pub struct SubjectRow<V,U> {pub before:Option<V>,pub after:Option<V>,pub unknown:Vec<U>}
+pub struct Entries<V,U> {
+    pub before:std::collections::BTreeMap<String,Option<V>>,pub after:std::collections::BTreeMap<String,Option<V>>,
+    pub unknown:Vec<U>,pub removed:Vec<String>,
+}
+pub open spec fn visited<V,U,E,F:Fn(&String)->Result<SubjectRow<V,U>,E>>(keys:Seq<String>,n:int,visit:F,rows:Seq<SubjectRow<V,U>>)->bool {
+    &&& rows.len()==n
+    &&& forall|i:int| 0<=i<n ==> visit.ensures((&keys[i],),Ok::<SubjectRow<V,U>,E>(#[trigger] rows[i]))
+}
+pub open spec fn declared<V,U>(keys:Seq<String>,rows:Seq<SubjectRow<V,U>>,base:bool)->Map<String,Option<V>>
+    decreases rows.len(),
+{
+    if rows.len()==0 {Map::empty()} else {let end=rows.len()-1;
+        declared(keys,rows.drop_last(),base).insert(keys[end],if base {rows[end].before}else{rows[end].after})}
+}
+pub open spec fn missing_entries<V,U>(rows:Seq<SubjectRow<V,U>>)->Seq<U>
+    decreases rows.len(),
+{if rows.len()==0 {Seq::empty()} else {missing_entries(rows.drop_last())+rows.last().unknown@}}
+pub open spec fn removed_subjects<V,U>(keys:Seq<String>,rows:Seq<SubjectRow<V,U>>)->Seq<String>
+    decreases rows.len(),
+{if rows.len()==0 {Seq::empty()} else {let previous=removed_subjects(keys,rows.drop_last());let i=rows.len()-1;
+    if rows[i].before.is_some() && rows[i].after.is_none() {previous.push(keys[i])} else {previous}}}
+
+pub fn collect<V,U,E,F,M>(keys:&[String],visit:F,missing:M)->(out:Result<Entries<V,U>,E>)
+    where F:Fn(&String)->Result<SubjectRow<V,U>,E>, M:Fn(PresenceError)->E,
+    requires vstd::laws_cmp::obeys_cmp::<String>(),forall|s:&String| visit.requires((s,)), forall|e:PresenceError| missing.requires((e,)),
+    ensures match out {
+        Ok(v)=>exists|rows:Seq<SubjectRow<V,U>>| #[trigger] visited(keys@,keys.len() as int,visit,rows)
+            && v.before@==declared(keys@,rows,true) && v.after@==declared(keys@,rows,false)
+            && v.unknown@==missing_entries(rows) && v.removed@==removed_subjects(keys@,rows),
+        Err(e)=>exists|i:int,rows:Seq<SubjectRow<V,U>>| 0<=i<keys.len() && #[trigger] visited(keys@,i,visit,rows)
+            && (visit.ensures((&keys@[i],),Err::<SubjectRow<V,U>,E>(e))
+                || exists|row:SubjectRow<V,U>,why:PresenceError| #[trigger] visit.ensures((&keys@[i],),Ok::<SubjectRow<V,U>,E>(row))
+                    && row.before.is_none() && row.after.is_none() && why.subject@==keys@[i]@
+                    && why.message@=="E_COST_REFERENCE: no declaration at either endpoint for "@ && #[trigger] missing.ensures((why,),e)),
+    },
+{
+    let mut before=std::collections::BTreeMap::new();let mut after=std::collections::BTreeMap::new();
+    let mut unknown=Vec::new();let mut removed=Vec::new();let mut i=0;let ghost mut rows=Seq::empty();
+    while i<keys.len()
+        invariant i<=keys.len(),visited(keys@,i as int,visit,rows),before@==declared(keys@,rows,true),after@==declared(keys@,rows,false),
+            unknown@==missing_entries(rows),removed@==removed_subjects(keys@,rows),vstd::laws_cmp::obeys_cmp::<String>(),
+            forall|s:&String| visit.requires((s,)),forall|e:PresenceError| missing.requires((e,)),
+        decreases keys.len()-i,
+    {
+        let k=&keys[i];let mut row=match visit(k) {Ok(r)=>r,Err(e)=>{assert(visited(keys@,i as int,visit,rows));return Err(e)}};
+        let ghost next=rows.push(row);assert(next.drop_last() =~= rows);
+        if let Err(reason)=record_subject_presence(row.before.is_some(),row.after.is_some(),k.clone(),&mut removed) {
+            let error=missing(reason);
+            assert(visited(keys@,i as int,visit,rows));
+            assert(exists|r:SubjectRow<V,U>,why:PresenceError| #[trigger] visit.ensures((k,),Ok::<SubjectRow<V,U>,E>(r))
+                && r.before.is_none() && r.after.is_none() && why.subject@==k@
+                && why.message@=="E_COST_REFERENCE: no declaration at either endpoint for "@ && #[trigger] missing.ensures((why,),error));
+            return Err(error);
+        }
+        before.insert(k.clone(),row.before);after.insert(k.clone(),row.after);unknown.append(&mut row.unknown);
+        proof {rows=next;} i+=1;
+    }
+    assert(visited(keys@,keys.len() as int,visit,rows));
+    Ok(Entries{before,after,unknown,removed})
+}
+/// Map actual model references to the ordered list of unknown members.
+pub open spec fn chosen<T>(items:Seq<Option<T>>)->Seq<T>
+    decreases items.len(),
+{ if items.len()==0 {Seq::empty()} else {let prefix=chosen(items.drop_last());match items.last(){None=>prefix,Some(v)=>prefix.push(v)}} }
+
+pub open spec fn projected<A,T,F:Fn(&A)->Option<T>>(models:Seq<A>,n:int,emit:F,items:Seq<Option<T>>)->bool {
+    items.len()==n && forall|i:int| 0<=i<n ==> emit.ensures((&models[i],),#[trigger] items[i])
+}
+pub fn unknown_entries<A,T,F,N>(members:Option<&[A]>,emit:F,no_members:N)->(out:Vec<T>)
+    where F:Fn(&A)->Option<T>,N:FnOnce()->T,
+    requires forall|a:&A| emit.requires((a,)),no_members.requires(()),
+    ensures match members {
+        None=>out.len()==0,
+        Some(m)=>if m.len()==0 {out.len()==1 && no_members.ensures((),out@[0])} else {
+            exists|items:Seq<Option<T>>| #[trigger] projected(m@,m.len() as int,emit,items) && out@==chosen(items)
+        },
+    },
+{
+    let Some(m)=members else {return Vec::new()};
+    if m.is_empty() {return vec![no_members()];}
+    let mut out=Vec::new();let mut i=0;let ghost mut items=Seq::empty();
+    while i<m.len()
+        invariant i<=m.len(),projected(m@,i as int,emit,items),out@==chosen(items),forall|a:&A| emit.requires((a,)),
+        decreases m.len()-i,
+    {
+        let item=emit(&m[i]);let ghost next=items.push(item);assert(next.drop_last() =~= items);
+        if let Some(x)=item {out.push(x);}
+        assert forall|j:int| 0<=j<i+1 implies emit.ensures((&m@[j],),#[trigger] next[j]) by {
+            if j<i {assert(next[j]==items[j]);}
+        }
+        proof {items=next;} i+=1;
+    }
+    assert(projected(m@,m.len() as int,emit,items));
+    out
+}
+pub fn ordered_sides<T,U,F>(before:&T,after:&T,visit:F)->(out:Vec<U>)
+    where F:Fn(Endpoint,&T)->Vec<U>,
+    requires visit.requires((Endpoint::Base,before)),visit.requires((Endpoint::Candidate,after)),
+    ensures exists|a:Vec<U>,b:Vec<U>| #[trigger] visit.ensures((Endpoint::Base,before),a)
+        && #[trigger] visit.ensures((Endpoint::Candidate,after),b) && out@==a@+b@,
+{
+    let mut a=visit(Endpoint::Base,before);
+    let mut b=visit(Endpoint::Candidate,after);
+    let ghost x=a;let ghost y=b;
+    a.append(&mut b);a
+}
 
 }

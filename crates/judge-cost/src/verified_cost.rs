@@ -12,6 +12,10 @@ use vstd::string::StringExecFns;
 #[path = "lib.rs"]
 pub mod cost_model;
 
+#[cfg(verus_keep_ghost)]
+#[path = "report.rs"]
+pub mod report;
+
 verus! {
 
 pub const MAX_REPORT_BYTES: usize = 64 * 1024 * 1024;

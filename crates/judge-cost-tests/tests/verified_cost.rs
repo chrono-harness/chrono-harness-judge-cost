@@ -24,6 +24,15 @@ use policy::report::read_report_bytes;
 mod roadmap;
 
 verus! {
+
+#[cfg(verus_keep_ghost)]
+fn diagnostic_delivery_preserves_the_business_status() {
+    let readable = policy::cli::finish(2, Some(String::new()), |_message: String| true);
+    let closed = policy::cli::finish(2, Some(String::new()), |_message: String| false);
+    let success = policy::cli::finish(0, None, |_message: String| false);
+    assert(readable == 2 && closed == 2 && success == 0);
+}
+
 /// Each missing field must set exactly its own report coordinate.
 fn check_model_field(key: &'static str) {
     let read = |name: &'static str| -> (absent: bool)
@@ -401,4 +410,44 @@ fn only_removed_subjects_append_without_losing_existing_entries() {
     expect_name(removed[1].as_str(), "成本\0尾");
 }
 
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[allow(dead_code, unexpected_cfgs)]
+#[path = "../../judge-cost/src/main.rs"]
+mod cli;
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn a_diagnostic_write_preserves_the_selected_status() {
+    use std::io::{self, Write};
+
+    struct Closed;
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut open = Vec::new();
+    assert_eq!(
+        cli::finish(2, Some("invalid report".into()), |msg| {
+            cli::write_diagnostic(&mut open, msg)
+        }),
+        2
+    );
+    assert_eq!(open, b"invalid report\n");
+    let mut attempted = false;
+    assert_eq!(
+        cli::finish(2, Some("original".into()), |msg| {
+            attempted = true;
+            assert_eq!(msg, "original");
+            cli::write_diagnostic(&mut Closed, msg)
+        }),
+        2
+    );
+    assert!(attempted);
+    assert_eq!(cli::finish(0, None, |_| panic!("unexpected diagnostic")), 0);
 }

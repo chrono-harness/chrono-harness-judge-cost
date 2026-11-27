@@ -9,6 +9,10 @@ use vstd::prelude::*;
 use vstd::string::StringExecFns;
 
 #[cfg(verus_keep_ghost)]
+#[path = "main.rs"]
+pub mod cli;
+
+#[cfg(verus_keep_ghost)]
 #[path = "lib.rs"]
 pub mod cost_model;
 

@@ -694,7 +694,20 @@
           "kind": "test-execution",
           "to": "test:judge-cost-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/judge-cost/src/verified_cost.rs",
+            "operation": "verify.judge-cost"
+          },
+          {
+            "path": "crates/judge-cost-tests/tests/verified_cost.rs",
+            "operation": "verify.judge-cost-tests"
+          }
+        ]
+      }
     },
     {
       "path": "crates/judge-cost/src/verified_cost.rs",

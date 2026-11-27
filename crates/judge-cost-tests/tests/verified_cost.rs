@@ -13,8 +13,12 @@ use vstd::vpanic as panic;
 
 #[cfg(not(verus_keep_ghost))]
 use chrono_judge_cost::model_fields;
+#[cfg(not(verus_keep_ghost))]
+use chrono_judge_cost::report::read_report_bytes;
 #[cfg(verus_keep_ghost)]
 use policy::cost_model::model_fields;
+#[cfg(verus_keep_ghost)]
+use policy::report::read_report_bytes;
 
 #[path = "../../../.chrono-harness/ci/roadmap.rs"]
 mod roadmap;
@@ -121,6 +125,31 @@ fn expect(actual: bool)
     requires actual,
 {
     if !actual { panic!(); }
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn bounded_report_read_preserves_the_reader_result() {
+    let read = |limit: u64| -> (out: Result<Vec<u8>, String>)
+        ensures match out { Ok(bytes) => limit == 67108865 && bytes@ == seq![81u8],
+            Err(_) => limit != 67108865 },
+    {
+        if limit == 67108865 {
+            let mut bytes = Vec::new();
+            bytes.push(81);
+            Ok(bytes)
+        } else { Err("wrong read limit".to_string()) }
+    };
+    match read_report_bytes(read) {
+        Ok(bytes) => { expect(bytes.len() == 1); expect(bytes[0] == 81); },
+        Err(_) => expect(false),
+    }
+    let failure = |_limit: u64| -> (out: Result<Vec<u8>, String>)
+        ensures out matches Err(reason) && reason@ == "reader failed"@,
+    { Err("reader failed".to_string()) };
+    match read_report_bytes(failure) {
+        Err(reason) => expect_name(&reason, "reader failed"),
+        Ok(_) => expect(false),
+    }
 }
 
 #[cfg_attr(not(verus_keep_ghost), test)]

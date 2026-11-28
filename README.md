@@ -14,8 +14,10 @@
 
 `report-v1` 直接从 stdin 读取一份由生产者准备的 JSON，包含 `base`、`candidate`、`impact` 和 `binding`。它向 stdout 输出状态、findings 和 `outputs.costs`。独立编译成本程序只需要本仓源码和 crates.io 依赖。
 
-报告在基线和候选的原登记表中分别查找。文件和测试按名称取首次出现的声明，项目和脚本选取该负责方的全部文件。Verus 在实际使用的代码上验证查找及成员选择。输出按路径排列成员，同时保留原行号和成本模型的 JSON Pointer。原生测试通过报告入口在两端分别解析这些指针，并核对重复路径和包含特殊字符的模型名。 成本模型名按 RFC 6901 逐字符编码，Verus 验证任意 Unicode 字符的输出和独立解码结果。实际报告使用 Rust 标准库的 chars、flat_map、flatten 和 String::extend 顺序写出字符，serde_json 负责在原登记表中解析指针。
+报告在基线和候选的原登记表中分别查找。文件和测试按名称取首次出现的声明，项目和脚本选取该负责方的全部文件。Verus 验证报告使用每个入选成员的实际路径和原登记索引作为排序键。Rust 标准库按元组顺序排序，首先按 UTF-8 路径，再按原索引排列同名成员。证明根按排好的键顺次使用原索引读取模型，保留第一个失败。原生报告测试核对实际排序、首错，以及两端原登记行和成本模型的 JSON Pointer。成本模型名按 RFC 6901 逐字符编码，Verus 验证任意 Unicode 字符的输出和独立解码结果。Rust 标准库负责字符迭代与字符串拼接，serde_json 负责在原登记表中解析指针。
 
-报告适配器将实际 `outputs.costs.unknown` 数组交给 Verus 证明根。数组为空时返回 `pass` 和零条 finding，有一个或多个条目时返回 `warn` 和一条 `W_COST_UNKNOWN`，原因指向原报告的未知条目。runner 使用这些判定字段；mixed 通过前置结果读取 `outputs.costs` 中的两端声明和绑定。JSON 的解码、序列化和进程 I/O 位于证明边界。
+证明根从同一个成员成本结构读取模型、成员身份和来源。serde_json 按请求的键观察原模型，缺字段和显式 null 均产生缺失坐标。Verus 验证四个坐标的键、顺序，以及用该模型的 `basis` 原值作为 unknown 的原因。unknown 为空时报告返回 `pass` 和零条 finding，有一个或多个条目时返回 `warn` 和一条 `W_COST_UNKNOWN`。runner 使用这些判定字段，mixed 通过前置结果读取 `outputs.costs` 中的两端声明和绑定。
+
+`report-v1` 的根覆盖读取预算、报告判断和退出决策。常规命令的根覆盖分派、子命令参数和委托错误状态。Rust 标准库的元组排序、原登记容器查询、指针和错误文本格式化、serde_json 的字段观察与编解码、文件描述符和 OS 进程替换由原生入口和下游检查验收。FILEMAP 对登记和 impact 的解释以及 runner 的协议处理由各自生产者负责。
 
 主检出的一次完整检查会产生 `.chrono-harness/state/preparation/` 和 `collection/` 中的报告。单独运行本仓单元时，报告写入 `cost/`。三个目录位于同一个 `.chrono-harness/state/` 下，在上方维护轮次中回收。需要跨期使用的原件请在下一批次前转存；持有已登记读者租约时会保全。首次启用前已有的报告，由持有者核对、转存后显式接管。

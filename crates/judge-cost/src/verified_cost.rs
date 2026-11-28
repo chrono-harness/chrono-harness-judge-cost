@@ -17,6 +17,11 @@ pub mod cli;
 pub mod cost_model;
 
 #[cfg(verus_keep_ghost)]
+use self::cost_model::model_fields;
+#[cfg(not(verus_keep_ghost))]
+use crate::model_fields;
+
+#[cfg(verus_keep_ghost)]
 #[path = "report.rs"]
 pub mod report;
 
@@ -341,17 +346,97 @@ pub open spec fn owned_rows(rows: Seq<CostFile>, owner: Seq<char>, end: nat) -> 
 /// Select every original row for this owner, including equal paths at distinct positions.
 pub fn owner_members(rows: &[CostFile], owner: &str) -> (members: Vec<usize>)
     ensures members@ == owned_rows(rows@, owner@, rows.len() as nat),
+        forall|j: int| 0 <= j < members.len() ==> #[trigger] members@[j] < rows.len(),
 {
-    let mut members = Vec::new();
+    let mut members: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < rows.len()
         invariant i <= rows.len(), members@ == owned_rows(rows@, owner@, i as nat),
+            forall|j: int| 0 <= j < members.len() ==> #[trigger] members@[j] < i,
         decreases rows.len() - i,
     {
         if <&str>::exec_eq(rows[i].owner.as_str(), owner) { members.push(i); }
         i += 1;
     }
     members
+}
+
+/// Supply Rust's tuple sort with paths and original registry indices. The index
+/// also breaks ties, preserving registry order for members with equal paths.
+pub fn member_sort_keys<'a>(
+    files: &'a [CostFile], indices: &[usize],
+) -> (keys: Vec<(&'a str, usize)>)
+    requires forall|i: int| 0 <= i < indices.len() ==> #[trigger] indices@[i] < files.len(),
+    ensures keys.len() == indices.len(),
+        forall|i: int| 0 <= i < keys.len() ==> (#[trigger] keys@[i]).1 == indices@[i]
+            && keys@[i].0@ == files@[indices@[i] as int].path@,
+{
+    let mut keys: Vec<(&str, usize)> = Vec::new();
+    let mut i = 0;
+    while i < indices.len()
+        invariant i <= indices.len(), keys.len() == i,
+            forall|j: int| 0 <= j < indices.len() ==> #[trigger] indices@[j] < files.len(),
+            forall|j: int| 0 <= j < i ==> (#[trigger] keys@[j]).1 == indices@[j]
+                && keys@[j].0@ == files@[indices@[j] as int].path@,
+        decreases indices.len() - i,
+    {
+        let row = indices[i];
+        keys.push((files[row].path.as_str(), row));
+        i += 1;
+    }
+    keys
+}
+
+pub open spec fn resolved_prefix<T, E, F: Fn(usize) -> Result<T, E>>(
+    keys: Seq<(&str, usize)>, resolve: F, values: Seq<T>,
+) -> bool {
+    forall|j: int| 0 <= j < values.len() ==>
+        resolve.ensures((keys[j].1,), Ok(#[trigger] values[j]))
+}
+
+pub open spec fn first_failure<T, E, F: Fn(usize) -> Result<T, E>>(
+    keys: Seq<(&str, usize)>, resolve: F, error: E,
+) -> bool {
+    exists|prefix: Seq<T>| prefix.len() < keys.len()
+        && #[trigger] resolve.ensures((keys[prefix.len() as int].1,), Err(error))
+        && resolved_prefix(keys, resolve, prefix)
+}
+
+/// Visit the sorted keys, always passing the original row to model lookup.
+pub fn resolve_members<T, E, F>(keys: &[(&str, usize)], resolve: F) -> (out: Result<Vec<T>, E>)
+    where F: Fn(usize) -> Result<T, E>,
+    requires forall|i: int| 0 <= i < keys.len() ==> resolve.requires(((#[trigger] keys@[i]).1,)),
+    ensures match out {
+        Ok(values) => values.len() == keys.len() && resolved_prefix(keys@, resolve, values@),
+        Err(error) => first_failure(keys@, resolve, error),
+    },
+{
+    let mut values = Vec::new();
+    let mut i = 0;
+    while i < keys.len()
+        invariant i <= keys.len(), values.len() == i,
+            forall|j: int| 0 <= j < keys.len() ==> resolve.requires(((#[trigger] keys@[j]).1,)),
+            resolved_prefix(keys@, resolve, values@),
+        decreases keys.len() - i,
+    {
+        let ghost previous = values@;
+        match resolve(keys[i].1) {
+            Ok(value) => {
+                values.push(value);
+                assert forall|j: int| 0 <= j < values.len()
+                    implies resolve.ensures((keys@[j].1,), Ok(#[trigger] values@[j])) by {
+                    if j < i { assert(values@[j] == previous[j]); }
+                }
+            },
+            Err(error) => {
+                assert(resolve.ensures((keys@[previous.len() as int].1,), Err(error)));
+                assert(first_failure(keys@, resolve, error));
+                return Err(error);
+            },
+        }
+        i += 1;
+    }
+    Ok(values)
 }
 
 #[cfg_attr(not(verus_keep_ghost), derive(serde::Serialize))]
@@ -458,21 +543,59 @@ pub fn no_members(endpoint: Endpoint, node: &str) -> (out: NoMembers<'_>)
 }
 
 #[cfg_attr(not(verus_keep_ghost), derive(serde::Serialize))]
-pub struct UnknownMember<'a, V> {
+pub struct UnknownMember<'a, M, R, S, V> {
     pub endpoint: &'static str,
     pub node: &'a str,
-    pub member: &'a V,
-    pub reference: &'a V,
-    pub source: &'a V,
+    pub member: &'a M,
+    pub reference: &'a R,
+    pub source: &'a S,
     pub coordinates: Vec<&'static str>,
     pub reason: &'a V,
 }
 
+/// Join the model observation with the identity of the same declaration.
+pub fn model_unknown<'a, V, F, B>(
+    endpoint: Endpoint, node: &'a str, cost: &'a ModelReference<'_, V>,
+    missing: F, field: B,
+) -> (out: Option<UnknownMember<'a, String, &'a str, Location<'a>, V>>)
+    where F: Fn(&V, &'static str) -> bool, B: Fn(&'a V, &'static str) -> &'a V,
+    requires
+        forall|key: &'static str| missing.requires((cost.value, key)),
+        field.requires((cost.value, "basis")),
+    ensures
+        out.is_none() ==> missing.ensures((cost.value, "cpu_ms"), false)
+            && missing.ensures((cost.value, "wall_ms"), false)
+            && missing.ensures((cost.value, "peak_rss_bytes"), false)
+            && missing.ensures((cost.value, "io_bytes"), false),
+        out matches Some(entry) ==> entry.member == &cost.member
+            && entry.reference == &cost.reference && entry.source == &cost.source
+            && field.ensures((cost.value, "basis"), entry.reason)
+            && entry.node == node
+            && entry.endpoint@ == match endpoint {
+                Endpoint::Base => "base"@, Endpoint::Candidate => "candidate"@,
+            }
+            && exists|cpu: bool, wall: bool, peak: bool, io: bool|
+                #[trigger] missing.ensures((cost.value, "cpu_ms"), cpu)
+                && #[trigger] missing.ensures((cost.value, "wall_ms"), wall)
+                && #[trigger] missing.ensures((cost.value, "peak_rss_bytes"), peak)
+                && #[trigger] missing.ensures((cost.value, "io_bytes"), io)
+                && coordinate_names(entry.coordinates@) == missing_names(cpu, wall, peak, io)
+                && entry.coordinates.len() == missing_names(cpu, wall, peak, io).len()
+                && forall|i: int| 0 <= i < entry.coordinates.len() ==> (#[trigger] entry.coordinates@[i])@
+                    == missing_names(cpu, wall, peak, io)[i],
+{
+    let basis = field(cost.value, "basis");
+    let mask = model_fields(|key: &'static str| -> (absent: bool)
+        ensures missing.ensures((cost.value, key), absent),
+    { missing(cost.value, key) });
+    unknown_member(endpoint, node, &cost.member, &cost.reference, &cost.source, basis, mask)
+}
+
 /// The publication decision and the published names use one coordinate list.
-pub fn unknown_member<'a, V>(
-    endpoint: Endpoint, node: &'a str, member: &'a V, reference: &'a V, source: &'a V, basis: &'a V,
+pub fn unknown_member<'a, M, R, S, V>(
+    endpoint: Endpoint, node: &'a str, member: &'a M, reference: &'a R, source: &'a S, basis: &'a V,
     missing: (bool, bool, bool, bool),
-) -> (out: Option<UnknownMember<'a, V>>)
+) -> (out: Option<UnknownMember<'a, M, R, S, V>>)
     ensures out.is_some() == (missing.0 || missing.1 || missing.2 || missing.3),
         out matches Some(entry) ==> {
             &&& entry.endpoint@ == match endpoint { Endpoint::Base => "base"@, Endpoint::Candidate => "candidate"@ }
@@ -558,17 +681,30 @@ pub struct Location<'a> {pub registry:&'a str,pub pointer:String}
 
 #[cfg_attr(not(verus_keep_ghost),derive(serde::Serialize))]
 pub struct ModelReference<'a,V> {
-    pub reference:&'a str,pub member:&'a str,pub value:&'a V,pub source:Location<'a>,pub declaration:Location<'a>,
+    pub reference:&'a str,pub member:String,pub value:&'a V,pub source:Location<'a>,pub declaration:Location<'a>,
 }
-pub fn model_reference<'a,V>(model:Option<&'a V>,id:&'a str,member:&'a str,registry:&'a str,source:String,declaration:String)
-    ->(out:Option<ModelReference<'a,V>>)
-    ensures out.is_some()==model.is_some(), out matches Some(r) ==> Some(r.value)==model
-        && r.reference==id && r.member==member && r.source.registry==registry && r.declaration.registry==registry
-        && r.source.pointer==source && r.declaration.pointer==declaration,
+#[cfg_attr(not(verus_keep_ghost), derive(Debug))]
+pub struct MissingModel<'a> {
+    pub reference: &'a str,
+    pub member: String,
+}
+
+pub fn model_reference<'a, V>(model: Option<&'a V>, id: &'a str, member: String,
+    registry: &'a str, source: String, declaration: String)
+    -> (out: Result<ModelReference<'a, V>, MissingModel<'a>>)
+    ensures out.is_ok() == model.is_some(),
+        out matches Ok(r) ==> Some(r.value) == model && r.reference == id && r.member == member
+            && r.source.registry == registry && r.declaration.registry == registry
+            && r.source.pointer == source && r.declaration.pointer == declaration,
+        out matches Err(e) ==> e.member == member && e.reference == id,
 {
-    match model {None=>None,Some(value)=>Some(ModelReference {
-        reference:id,member,value,source:Location{registry,pointer:source},declaration:Location{registry,pointer:declaration}
-    })}
+    match model {
+        None => Err(MissingModel { reference: id, member }),
+        Some(value) => Ok(ModelReference {
+            reference: id, member, value, source: Location { registry, pointer: source },
+            declaration: Location { registry, pointer: declaration },
+        }),
+    }
 }
 
 pub enum Selection { Missing, MissingTest, File(usize), Test(usize), Owner(&'static str,Vec<usize>) }
@@ -585,7 +721,8 @@ pub fn declaration(files:&[CostFile], tests:&[TestCost],kind:CostKind,id:&str,re
             _=>false,
         }},
         _=>if !registered {out is Missing} else {out matches Selection::Owner(label,rows)
-            && label@==(if kind is Project {"project"@} else {"script"@}) && rows@==owned_rows(files@,id@,files.len() as nat)},
+            && label@==(if kind is Project {"project"@} else {"script"@}) && rows@==owned_rows(files@,id@,files.len() as nat)
+            && forall|i: int| 0 <= i < rows.len() ==> #[trigger] rows@[i] < files.len()},
     },
 {
     match kind {
@@ -750,17 +887,24 @@ pub open spec fn chosen<T>(items:Seq<Option<T>>)->Seq<T>
 pub open spec fn projected<A,T,F:Fn(&A)->Option<T>>(models:Seq<A>,n:int,emit:F,items:Seq<Option<T>>)->bool {
     items.len()==n && forall|i:int| 0<=i<n ==> emit.ensures((&models[i],),#[trigger] items[i])
 }
-pub fn unknown_entries<A,T,F,N>(members:Option<&[A]>,emit:F,no_members:N)->(out:Vec<T>)
+#[cfg_attr(not(verus_keep_ghost), derive(serde::Serialize))]
+pub struct DeclaredCost<A> {
+    pub kind: &'static str,
+    pub costs: Vec<A>,
+}
+
+pub fn unknown_entries<A,T,F,N>(entry:Option<&DeclaredCost<A>>,emit:F,no_members:N)->(out:Vec<T>)
     where F:Fn(&A)->Option<T>,N:FnOnce()->T,
     requires forall|a:&A| emit.requires((a,)),no_members.requires(()),
-    ensures match members {
+    ensures match entry {
         None=>out.len()==0,
-        Some(m)=>if m.len()==0 {out.len()==1 && no_members.ensures((),out@[0])} else {
-            exists|items:Seq<Option<T>>| #[trigger] projected(m@,m.len() as int,emit,items) && out@==chosen(items)
+        Some(entry)=>if entry.costs.len()==0 {out.len()==1 && no_members.ensures((),out@[0])} else {
+            exists|items:Seq<Option<T>>| #[trigger] projected(entry.costs@,entry.costs.len() as int,emit,items) && out@==chosen(items)
         },
     },
 {
-    let Some(m)=members else {return Vec::new()};
+    let Some(entry)=entry else {return Vec::new()};
+    let m = &entry.costs;
     if m.is_empty() {return vec![no_members()];}
     let mut out=Vec::new();let mut i=0;let ghost mut items=Seq::empty();
     while i<m.len()

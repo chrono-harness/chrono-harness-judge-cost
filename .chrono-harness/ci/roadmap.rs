@@ -5,6 +5,11 @@ use verus_builtin_macros::verus;
 use vstd::prelude::*;
 
 verus! {
+/// Bind the running host adapter to this existing Verus operation.
+pub fn native_compiler_check() -> &'static str {
+    include_str!("../../check.sh")
+}
+
 pub fn deployed_tool_installer() -> (source: &'static str) {
     include_str!("../install-tools.sh")
 }
@@ -49,6 +54,16 @@ mod native {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect()
+    }
+
+    #[test]
+    fn native_compiler_check_uses_the_installed_selector_before_source_verification() {
+        let script = native_compiler_check();
+        let selector = r#"chrono-host-bootstrap select-native-cargo-library "$(pwd -P)/$product" "$scratch/build.jsonl""#;
+        let source_check = r#"chrono-host-bootstrap check-compiler-sources native "$stem""#;
+        let selection = script.find(selector).expect("registered Cargo selector");
+        let verification = script.find(source_check).expect("registered source check");
+        assert!(selection < verification);
     }
 
     #[test]

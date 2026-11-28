@@ -5,6 +5,16 @@ use verus_builtin_macros::verus;
 use vstd::prelude::*;
 
 verus! {
+pub fn deployed_tool_installer() -> (source: &'static str) {
+    include_str!("../install-tools.sh")
+}
+
+pub fn installer_digest_matches(digest: &String) -> (accepted: bool)
+    ensures accepted == (digest@ == "39566b5b467e31e09edb73ffc0c79b6c719ef0f59b684df9c165bfb66048af47"@),
+{
+    *digest == "39566b5b467e31e09edb73ffc0c79b6c719ef0f59b684df9c165bfb66048af47".to_string()
+}
+
 /// Both deployed files are inputs to this proof compilation and its native test.
 pub fn deployed_roadmap() -> (&'static str, &'static str) {
     (include_str!("../../.github/roadmap.cjs"), include_str!("../../.github/workflows/issue-roadmap.yml"))
@@ -39,6 +49,15 @@ mod native {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect()
+    }
+
+    #[test]
+    fn deployed_tool_installer_matches_the_selected_template() {
+        let digest = roadmap_digest(deployed_tool_installer());
+        assert!(
+            installer_digest_matches(&digest),
+            "install-tools.sh differs from the selected template"
+        );
     }
 
     fn locked_roadmap_reference<'a>(

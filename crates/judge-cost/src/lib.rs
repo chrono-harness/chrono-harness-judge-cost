@@ -28,7 +28,7 @@ pub fn model_fields<F>(missing: F) -> (observed: (bool, bool, bool, bool))
 #[cfg(not(verus_keep_ghost))]
 pub use registry::CostRegistry;
 #[cfg(not(verus_keep_ghost))]
-use verified_cost::{CostFile, CostKind};
+use verified_cost::CostKind;
 #[cfg(not(verus_keep_ghost))]
 mod registry;
 #[cfg(not(verus_keep_ghost))]
@@ -60,43 +60,6 @@ pub struct FilemapImpact<D> {
 }
 
 #[cfg(not(verus_keep_ghost))]
-fn reference<'a>(
-    r: &'a CostRegistry,
-    id: &'a str,
-    member: String,
-    pointer: String,
-) -> Result<policy::ModelReference<'a, Value>, String> {
-    let mut model_path = String::from("/cost_models/");
-    model_path.extend(policy::escaped_model_token(id));
-    policy::model_reference(
-        r.filemap.cost_models.get(id),
-        id,
-        member,
-        &r.path,
-        model_path,
-        pointer,
-    )
-    .map_err(|error| {
-        format!(
-            "E_COST_REFERENCE: missing cost model {} for {}",
-            error.reference, error.member
-        )
-    })
-}
-#[cfg(not(verus_keep_ghost))]
-fn file_cost<'a>(
-    r: &'a CostRegistry,
-    index: usize,
-    file: &'a CostFile,
-) -> Result<policy::ModelReference<'a, Value>, String> {
-    reference(
-        r,
-        &file.cost,
-        format!("file:{}", file.path),
-        format!("/files/{index}/cost"),
-    )
-}
-#[cfg(not(verus_keep_ghost))]
 type DeclaredCost<'a> = policy::DeclaredCost<policy::ModelReference<'a, Value>>;
 
 #[cfg(not(verus_keep_ghost))]
@@ -108,29 +71,19 @@ fn entry<'a>(
 ) -> Result<Option<DeclaredCost<'a>>, String> {
     let files = &r.filemap.files;
     let tests = &r.filemap.test_costs;
-    let (kind, costs) = match policy::declaration(files, tests, kind, id, r.nodes.contains(node)) {
-        policy::Selection::Missing => return Ok(None),
-        policy::Selection::MissingTest => {
-            return Err(format!("E_COST_REFERENCE: missing test cost {node}"));
-        }
-        policy::Selection::File(i) => ("file", vec![file_cost(r, i, &files[i])?]),
-        policy::Selection::Test(i) => (
-            "test",
-            vec![reference(
-                r,
-                &tests[i].cost,
-                node.to_owned(),
-                format!("/test_costs/{i}/cost"),
-            )?],
-        ),
-        policy::Selection::Owner(label, indices) => {
-            let mut keys = policy::member_sort_keys(files, &indices);
+    policy::resolve_declaration(
+        files,
+        tests,
+        policy::declaration(files, tests, kind, id, r.nodes.contains(node)),
+        node,
+        &r.path,
+        |key| r.filemap.cost_models.get(key),
+        |chars| chars.into_iter().collect(),
+        |mut keys| {
             keys.sort_unstable();
-            let costs = policy::resolve_members(&keys, |i| file_cost(r, i, &files[i]))?;
-            (label, costs)
-        }
-    };
-    Ok(Some(policy::DeclaredCost { kind, costs }))
+            keys
+        },
+    )
 }
 
 /// Declaration-only report over FILEMAP's existing impact. No operations or resource measurement.
@@ -178,8 +131,7 @@ fn collect_costs<'a, D: ChangedFile>(
     policy::collect(
         &keys,
         |subject| {
-            let (kind, id) = policy::cost_subject(subject)
-                .ok_or_else(|| format!("E_COST_REFERENCE: unsupported cost subject {subject}"))?;
+            let (kind, id) = policy::require_subject(subject)?;
             let (a, b) = policy::endpoints(base, candidate, |endpoint| {
                 entry(endpoint, subject, kind, id)
             })?;
@@ -205,6 +157,6 @@ fn collect_costs<'a, D: ChangedFile>(
                 unknown,
             })
         },
-        |error| format!("{}{}", error.message, error.subject),
+        policy::presence_message,
     )
 }

@@ -22,9 +22,9 @@ pub fn roadmap_repository(checkout: bool, owner_id: u64, repo_id: u64) -> (accep
 }
 /// The native caller hashes the actual UTF-8 bytes embedded above.
 pub fn roadmap_matches(script: &String, workflow: &String) -> (accepted: bool)
-    ensures accepted == (script@ == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9"@ && workflow@ == "084f40b32452b36eed8ad1651bd32fd6d4584cb8e63fa3a25a7eadffcfc78209"@),
+    ensures accepted == (script@ == "86e97ab0ed63be36d37d32e7d164da4e226c6f616685ad4ce1dd75f814095f8a"@ && workflow@ == "a96441312ef65ef562263e22bdb3e0afa2f2af2b3c0a1d6f4efcce07d3c5d62f"@),
 {
-    *script == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9".to_string() && *workflow == "084f40b32452b36eed8ad1651bd32fd6d4584cb8e63fa3a25a7eadffcfc78209".to_string()
+    *script == "86e97ab0ed63be36d37d32e7d164da4e226c6f616685ad4ce1dd75f814095f8a".to_string() && *workflow == "a96441312ef65ef562263e22bdb3e0afa2f2af2b3c0a1d6f4efcce07d3c5d62f".to_string()
 }
 }
 

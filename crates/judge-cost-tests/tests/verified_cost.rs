@@ -163,6 +163,78 @@ fn dispatch_and_pipeline_keep_native_tail_and_child_identity() {
     expect(matches!(policy::exit_report(Err::<(),u8>(5)),(2,Some(5))));
 }
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn unsupported_subject_reports_the_original_text() {
+    proof {
+        reveal_strlit("File:目录");
+        reveal_strlit("file:");
+        reveal_strlit("project:");
+        reveal_strlit("script:");
+        reveal_strlit("test:");
+        assert("File:目录"@[0] != "file:"@[0] && "File:目录"@[0] != "project:"@[0]
+            && "File:目录"@[0] != "script:"@[0] && "File:目录"@[0] != "test:"@[0]);
+        reveal_strlit("E_COST_REFERENCE: unsupported cost subject ");
+        reveal_strlit("E_COST_REFERENCE: unsupported cost subject File:目录");
+        assert("E_COST_REFERENCE: unsupported cost subject "@ + "File:目录"@
+            =~= "E_COST_REFERENCE: unsupported cost subject File:目录"@);
+    }
+    let result = policy::require_subject("File:目录");
+    match result {
+        Err(error) => expect_name(error.as_str(), "E_COST_REFERENCE: unsupported cost subject File:目录"),
+        Ok(_) => expect(false),
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+fn selected_file_and_test_own_their_reference<V, Render>(
+    file: &policy::CostFile,
+    test: &policy::TestCost,
+    value: &V,
+    render: Render,
+)
+    where Render: Fn(Vec<char>) -> String,
+    requires
+        forall|chars: Vec<char>| render.requires((chars,)),
+        forall|chars: Vec<char>, text: String| #[trigger] render.ensures((chars,), text)
+            ==> text@ == chars@,
+{
+    let lookup = |_key: &str| -> (model: Option<&V>)
+        ensures model == Some(value),
+    { Some(value) };
+    let a = policy::reference(policy::CostMember::File(7, file), "base", &lookup, &render);
+    let b = policy::reference(policy::CostMember::Test(13, test), "candidate", &lookup, &render);
+    assert(a.is_ok());
+    assert(b.is_ok());
+    if let Ok(a) = a {
+        expect_name(a.reference, file.cost.as_str());
+        expect_name(a.source.registry, "base");
+        expect_name(a.declaration.registry, "base");
+        assert(a.member@ == "file:"@ + file.path@);
+        assert(policy::row_location(7, "/files/"@, a.declaration.pointer@));
+    }
+    if let Ok(b) = b {
+        expect_name(b.reference, test.cost.as_str());
+        expect_name(b.source.registry, "candidate");
+        expect_name(b.declaration.registry, "candidate");
+        assert(b.member@ == "test:"@ + test.test@);
+        assert(policy::row_location(13, "/test_costs/"@, b.declaration.pointer@));
+    }
+    let missing = |_key: &str| -> (model: Option<&V>)
+        ensures model.is_none(),
+    { None };
+    let failed = policy::reference(policy::CostMember::Test(13, test), "candidate", &missing, &render);
+    assert(failed.is_err());
+    if let Err(error) = failed {
+        proof {
+            reveal_strlit(" for ");
+            reveal_strlit("test:");
+            reveal_strlit(" for test:");
+            assert(" for "@ + "test:"@ =~= " for test:"@);
+            assert(error@ =~= "E_COST_REFERENCE: missing cost model "@ + test.cost@ + " for test:"@ + test.test@);
+        }
+    }
+}
+
 #[cfg_attr(not(verus_keep_ghost),test)]
 fn copied_reports_keep_both_declarations_test_lists_original_sources_and_binding() {
     let a=4u8;let b=9u8;
@@ -476,6 +548,15 @@ fn absent_endpoints_preserve_subject_and_existing_removals() {
     let error = result.unwrap_err();
     expect_name(error.message, "E_COST_REFERENCE: no declaration at either endpoint for ");
     expect_name(error.subject.as_str(), "成本\0尾");
+    proof {
+        reveal_strlit("E_COST_REFERENCE: no declaration at either endpoint for ");
+        reveal_strlit("成本\0尾");
+        reveal_strlit("E_COST_REFERENCE: no declaration at either endpoint for 成本\0尾");
+        assert("E_COST_REFERENCE: no declaration at either endpoint for "@ + "成本\0尾"@
+            =~= "E_COST_REFERENCE: no declaration at either endpoint for 成本\0尾"@);
+    }
+    let message = policy::presence_message(error);
+    expect_name(message.as_str(), "E_COST_REFERENCE: no declaration at either endpoint for 成本\0尾");
     expect(removed.len() == 1);
     expect_name(removed[0].as_str(), "previous");
 }
@@ -572,4 +653,55 @@ fn report_preserves_the_first_missing_model_in_sorted_member_order() {
         "E_COST_REFERENCE: missing cost model first-missing for file:a"
     );
     assert!(output.is_empty());
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn report_rejects_the_first_subject_and_the_first_failing_endpoint() {
+    use serde_json::{Value, json};
+
+    let mut base: Value = serde_json::from_str(include_str!("fixtures/filemap-view.json")).unwrap();
+    let mut candidate = base.clone();
+    for (view, tag) in [(&mut base, "base"), (&mut candidate, "candidate")] {
+        let rows = view["filemap"]["files"].as_array_mut().unwrap();
+        rows.insert(0, json!({"path":"a","owner":"p","cost":tag}));
+        rows.insert(0, json!({"path":"z","owner":"p","cost":"later"}));
+    }
+    let mut impact = json!({
+        "schema":"chrono-filemap-impact/v6","delta":[{"path":"z"},{"path":"a"}],
+        "reached":[],"required_tests":[],"tests":[],"retired_tests":[]
+    });
+    let binding = json!({"base":"base","candidate":"candidate","candidate_tree":"tree","registry_digest":"registry","context_digest":"context"});
+    let report_error = |base: &Value, candidate: &Value, impact: &Value| {
+        let input = json!({"base":base, "candidate":candidate, "impact":impact, "binding":binding});
+        let bytes = serde_json::to_vec(&input).unwrap();
+        let mut output = Vec::new();
+        let error =
+            chrono_judge_cost::report::write_report(bytes.as_slice(), &mut output).unwrap_err();
+        assert!(output.is_empty());
+        error
+    };
+    assert_eq!(
+        report_error(&base, &candidate, &impact),
+        "E_COST_REFERENCE: missing cost model base for file:a"
+    );
+    base["filemap"]["cost_models"]["base"] = json!({});
+    assert_eq!(
+        report_error(&base, &candidate, &impact),
+        "E_COST_REFERENCE: missing cost model candidate for file:a"
+    );
+
+    impact["delta"] = json!([]);
+    impact["required_tests"] = json!(["test:t"]);
+    base["filemap"]["test_costs"] = json!([]);
+    assert_eq!(
+        report_error(&base, &candidate, &impact),
+        "E_COST_REFERENCE: missing test cost test:t"
+    );
+
+    impact["required_tests"] = json!(["invalid:目录"]);
+    assert_eq!(
+        report_error(&base, &candidate, &impact),
+        "E_COST_REFERENCE: unsupported cost subject invalid:目录"
+    );
 }

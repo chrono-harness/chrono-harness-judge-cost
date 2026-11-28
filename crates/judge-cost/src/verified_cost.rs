@@ -640,6 +640,11 @@ pub fn record_subject_presence(
     if before && !after { removed.push(subject); }
     Ok(())
 }
+pub fn presence_message(error: PresenceError) -> (message: String)
+    ensures message@ == error.message@ + error.subject@,
+{
+    String::from_str(error.message).concat(error.subject.as_str())
+}
 pub fn direct_report(name: Option<&str>, count: usize) -> (chosen: bool)
     ensures chosen == (count == 1 && (name matches Some(s) && s@ == "report-v1"@)),
 {
@@ -707,6 +712,120 @@ pub fn model_reference<'a, V>(model: Option<&'a V>, id: &'a str, member: String,
     }
 }
 
+/// The same selected declaration supplies the model key, identity and pointer.
+#[derive(Clone, Copy)]
+pub enum CostMember<'a> {
+    File(usize, &'a CostFile),
+    Test(usize, &'a TestCost),
+}
+
+pub open spec fn row_pointer(table: Seq<char>, digits: Seq<char>) -> Seq<char> {
+    table + digits + "/cost"@
+}
+
+pub open spec fn model_error(id: Seq<char>, member: Seq<char>) -> Seq<char> {
+    "E_COST_REFERENCE: missing cost model "@ + id + " for "@ + member
+}
+
+pub open spec fn row_location(index: usize, table: Seq<char>, pointer: Seq<char>) -> bool {
+    exists|digits: String| #[trigger] vstd::string::to_string_from_display_ensures(&index, digits)
+        && pointer == row_pointer(table, digits@)
+}
+
+pub open spec fn yields_reference<V>(
+    row: CostMember<'_>,
+    out: Result<ModelReference<'_, V>, String>,
+) -> bool {
+    let (i, id, member, table) = match row {
+        CostMember::File(i, file) => (i, file.cost@, "file:"@ + file.path@, "/files/"@),
+        CostMember::Test(i, test) => (i, test.cost@, "test:"@ + test.test@, "/test_costs/"@),
+    };
+    match out {
+        Ok(value) => value.reference@ == id && value.member@ == member
+            && row_location(i, table, value.declaration.pointer@),
+        Err(error) => error@ == model_error(id, member),
+    }
+}
+
+pub fn reference<'a, V, Lookup, Render>(
+    row: CostMember<'a>,
+    registry: &'a str,
+    lookup: &Lookup,
+    render: &Render,
+) -> (out: Result<ModelReference<'a, V>, String>)
+    where Lookup: Fn(&'a str) -> Option<&'a V>, Render: Fn(Vec<char>) -> String,
+    requires
+        forall|id: &'a str| lookup.requires((id,)),
+        forall|chars: Vec<char>| render.requires((chars,)),
+        forall|chars: Vec<char>, text: String| #[trigger] render.ensures((chars,), text)
+            ==> text@ == chars@,
+    ensures
+        out matches Ok(value) ==> value.source.registry == registry && value.declaration.registry == registry,
+        out matches Ok(value) ==> lookup.ensures((value.reference,), Some(value.value)),
+        out matches Ok(value) ==> value.source.pointer@ == "/cost_models/"@
+            + pointer_suffix(value.reference@, value.reference@.len() as int),
+        out.is_err() ==> exists|key: &'a str| #[trigger] lookup.ensures((key,), None)
+            && key@ == match row { CostMember::File(_, file) => file.cost@, CostMember::Test(_, test) => test.cost@ },
+        yields_reference(row, out),
+{
+    let (index, id, member, table) = match row {
+        CostMember::File(i, file) => (
+            i, file.cost.as_str(), String::from_str("file:").concat(file.path.as_str()), "/files/",
+        ),
+        CostMember::Test(i, test) => (
+            i, test.cost.as_str(), String::from_str("test:").concat(test.test.as_str()), "/test_costs/",
+        ),
+    };
+    proof {
+        match row {
+            CostMember::File(i, file) => {
+                assert(index == i && id@ == file.cost@ && member@ == "file:"@ + file.path@ && table@ == "/files/"@);
+            },
+            CostMember::Test(i, test) => {
+                assert(index == i && id@ == test.cost@ && member@ == "test:"@ + test.test@ && table@ == "/test_costs/"@);
+            },
+        }
+    }
+    let model = lookup(id);
+    let digits = index.to_string();
+    let pointer = String::from_str(table).concat(digits.as_str()).concat("/cost");
+    assert(pointer@ == row_pointer(table@, digits@));
+    let token = escaped_model_token(id);
+    let suffix = render(token);
+    assert(suffix@ == pointer_suffix(id@, id@.len() as int));
+    let source = String::from_str("/cost_models/").concat(suffix.as_str());
+    match model_reference(model, id, member, registry, source, pointer) {
+        Ok(value) => {
+            assert(lookup.ensures((value.reference,), Some(value.value)));
+            assert(row_location(index, table@, value.declaration.pointer@));
+            Ok(value)
+        },
+        Err(error) => {
+            assert(lookup.ensures((id,), None));
+            assert(exists|key: &'a str| #[trigger] lookup.ensures((key,), None) && key@ == id@);
+            let message = String::from_str("E_COST_REFERENCE: missing cost model ")
+                .concat(error.reference)
+                .concat(" for ")
+                .concat(error.member.as_str());
+            assert(message@ == model_error(id@, member@));
+            Err(message)
+        },
+    }
+}
+
+pub fn require_subject(text: &str) -> (out: Result<(CostKind, &str), String>)
+    ensures match out {
+        Ok((kind, id)) => classification(text@) == Some(kind) && text@ == kind.tag() + id@,
+        Err(error) => classification(text@).is_none()
+            && error@ == "E_COST_REFERENCE: unsupported cost subject "@ + text@,
+    },
+{
+    match cost_subject(text) {
+        Some(parts) => Ok(parts),
+        None => Err(String::from_str("E_COST_REFERENCE: unsupported cost subject ").concat(text)),
+    }
+}
+
 pub enum Selection { Missing, MissingTest, File(usize), Test(usize), Owner(&'static str,Vec<usize>) }
 pub fn declaration(files:&[CostFile], tests:&[TestCost],kind:CostKind,id:&str,registered:bool)->(out:Selection)
     ensures match kind {
@@ -731,6 +850,97 @@ pub fn declaration(files:&[CostFile], tests:&[TestCost],kind:CostKind,id:&str,re
         CostKind::Project=>if registered {Selection::Owner("project",owner_members(files,id))} else {Selection::Missing},
         CostKind::Script=>if registered {Selection::Owner("script",owner_members(files,id))} else {Selection::Missing},
     }
+}
+
+pub fn resolve_declaration<'a, V, Lookup, Render, Sort>(
+    files: &'a [CostFile],
+    tests: &'a [TestCost],
+    selection: Selection,
+    node: &str,
+    registry: &'a str,
+    lookup: Lookup,
+    render: Render,
+    sort: Sort,
+) -> (out: Result<Option<DeclaredCost<ModelReference<'a, V>>>, String>)
+    where
+        Lookup: Fn(&'a str) -> Option<&'a V>,
+        Render: Fn(Vec<char>) -> String,
+        Sort: FnOnce(Vec<(&'a str, usize)>) -> Vec<(&'a str, usize)>,
+    requires
+        forall|id: &'a str| lookup.requires((id,)),
+        forall|chars: Vec<char>| render.requires((chars,)),
+        forall|chars: Vec<char>, text: String| #[trigger] render.ensures((chars,), text)
+            ==> text@ == chars@,
+        forall|keys: Vec<(&'a str, usize)>| sort.requires((keys,)),
+        forall|keys: Vec<(&'a str, usize)>, ordered: Vec<(&'a str, usize)>|
+            #[trigger] sort.ensures((keys,), ordered) ==> ordered@.to_multiset() == keys@.to_multiset(),
+        match selection {
+            Selection::File(i) => i < files.len(),
+            Selection::Test(i) => i < tests.len(),
+            Selection::Owner(_, indices) =>
+                forall|i: int| 0 <= i < indices.len() ==> #[trigger] indices@[i] < files.len(),
+            _ => true,
+        },
+    ensures match selection {
+        Selection::Missing => out matches Ok(None),
+        Selection::MissingTest => out matches Err(error)
+            && error@ == "E_COST_REFERENCE: missing test cost "@ + node@,
+        Selection::File(i) => match out {
+            Ok(Some(entry)) => entry.kind@ == "file"@ && entry.costs.len() == 1
+                && entry.costs@[0].reference@ == files@[i as int].cost@
+                && entry.costs@[0].member@ == "file:"@ + files@[i as int].path@,
+            Err(error) => error@ == model_error(files@[i as int].cost@, "file:"@ + files@[i as int].path@),
+            _ => false,
+        },
+        Selection::Test(i) => match out {
+            Ok(Some(entry)) => entry.kind@ == "test"@ && entry.costs.len() == 1
+                && entry.costs@[0].reference@ == tests@[i as int].cost@
+                && entry.costs@[0].member@ == "test:"@ + tests@[i as int].test@,
+            Err(error) => error@ == model_error(tests@[i as int].cost@, "test:"@ + tests@[i as int].test@),
+            _ => false,
+        },
+        Selection::Owner(label, indices) => match out {
+            Ok(Some(entry)) => entry.kind == label && entry.costs.len() == indices.len(),
+            Err(_) => true,
+            _ => false,
+        },
+    },
+{
+    let (kind, costs) = match selection {
+        Selection::Missing => return Ok(None),
+        Selection::MissingTest =>
+            return Err(String::from_str("E_COST_REFERENCE: missing test cost ").concat(node)),
+        Selection::File(i) =>
+            ("file", vec![reference(CostMember::File(i, &files[i]), registry, &lookup, &render)?]),
+        Selection::Test(i) =>
+            ("test", vec![reference(CostMember::Test(i, &tests[i]), registry, &lookup, &render)?]),
+        Selection::Owner(label, indices) => {
+            let keys = member_sort_keys(files, &indices);
+            let ghost original = keys;
+            let ordered = sort(keys);
+            assert forall|i: int| 0 <= i < ordered.len()
+                implies (#[trigger] ordered@[i]).1 < files.len() by {
+                vstd::seq_lib::to_multiset_contains(ordered@, ordered@[i]);
+                vstd::seq_lib::to_multiset_contains(original@, ordered@[i]);
+                let j = choose|j: int| 0 <= j < original.len() && original@[j] == ordered@[i];
+                assert(indices@[j] < files.len());
+            }
+            proof { vstd::seq_lib::to_multiset_len(ordered@); }
+            proof { vstd::seq_lib::to_multiset_len(original@); }
+            let resolve = |i: usize| -> (result: Result<ModelReference<'a, V>, String>)
+                requires i < files.len(),
+                ensures yields_reference(CostMember::File(i, &files@[i as int]), result),
+            { reference(CostMember::File(i, &files[i]), registry, &lookup, &render) };
+            let costs = resolve_members(&ordered, resolve)?;
+            assert forall|i: int| 0 <= i < costs.len() implies
+                yields_reference(CostMember::File(ordered@[i].1, &files@[ordered@[i].1 as int]),
+                    Ok(#[trigger] costs@[i])) by {
+                assert(resolve.ensures((ordered@[i].1,), Ok(costs@[i])));
+            }
+            (label, costs)
+        },
+    };
+    Ok(Some(DeclaredCost { kind, costs }))
 }
 
 pub fn endpoints<'a,T,E,R,F>(base:&'a R,candidate:&'a R,entry:F)->(out:Result<(T,T),E>)

@@ -22,6 +22,7 @@ pub fn model_fields<F>(missing: F) -> (observed: (bool, bool, bool, bool))
 {
     (missing("cpu_ms"), missing("wall_ms"), missing("peak_rss_bytes"), missing("io_bytes"))
 }
+
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -59,10 +60,15 @@ pub struct FilemapImpact<D> {
 }
 
 #[cfg(not(verus_keep_ghost))]
-fn reference(r: &CostRegistry, id: &str, member: &str, pointer: String) -> Result<Value, String> {
+fn reference<'a>(
+    r: &'a CostRegistry,
+    id: &'a str,
+    member: String,
+    pointer: String,
+) -> Result<policy::ModelReference<'a, Value>, String> {
     let mut model_path = String::from("/cost_models/");
     model_path.extend(policy::escaped_model_token(id));
-    let reference = policy::model_reference(
+    policy::model_reference(
         r.filemap.cost_models.get(id),
         id,
         member,
@@ -70,20 +76,36 @@ fn reference(r: &CostRegistry, id: &str, member: &str, pointer: String) -> Resul
         model_path,
         pointer,
     )
-    .ok_or_else(|| format!("E_COST_REFERENCE: missing cost model {id} for {member}"))?;
-    Ok(json!(reference))
+    .map_err(|error| {
+        format!(
+            "E_COST_REFERENCE: missing cost model {} for {}",
+            error.reference, error.member
+        )
+    })
 }
 #[cfg(not(verus_keep_ghost))]
-fn file_cost(r: &CostRegistry, index: usize, file: &CostFile) -> Result<Value, String> {
+fn file_cost<'a>(
+    r: &'a CostRegistry,
+    index: usize,
+    file: &'a CostFile,
+) -> Result<policy::ModelReference<'a, Value>, String> {
     reference(
         r,
         &file.cost,
-        &format!("file:{}", file.path),
+        format!("file:{}", file.path),
         format!("/files/{index}/cost"),
     )
 }
 #[cfg(not(verus_keep_ghost))]
-fn entry(r: &CostRegistry, node: &str, kind: CostKind, id: &str) -> Result<Option<Value>, String> {
+type DeclaredCost<'a> = policy::DeclaredCost<policy::ModelReference<'a, Value>>;
+
+#[cfg(not(verus_keep_ghost))]
+fn entry<'a>(
+    r: &'a CostRegistry,
+    node: &str,
+    kind: CostKind,
+    id: &str,
+) -> Result<Option<DeclaredCost<'a>>, String> {
     let files = &r.filemap.files;
     let tests = &r.filemap.test_costs;
     let (kind, costs) = match policy::declaration(files, tests, kind, id, r.nodes.contains(node)) {
@@ -97,20 +119,18 @@ fn entry(r: &CostRegistry, node: &str, kind: CostKind, id: &str) -> Result<Optio
             vec![reference(
                 r,
                 &tests[i].cost,
-                node,
+                node.to_owned(),
                 format!("/test_costs/{i}/cost"),
             )?],
         ),
-        policy::Selection::Owner(label, mut indices) => {
-            indices.sort_by_key(|&i| files[i].path.as_str());
-            let costs = indices
-                .into_iter()
-                .map(|i| file_cost(r, i, &files[i]))
-                .collect::<Result<Vec<_>, _>>()?;
+        policy::Selection::Owner(label, indices) => {
+            let mut keys = policy::member_sort_keys(files, &indices);
+            keys.sort_unstable();
+            let costs = policy::resolve_members(&keys, |i| file_cost(r, i, &files[i]))?;
             (label, costs)
         }
     };
-    Ok(Some(json!({"kind":kind,"costs":costs})))
+    Ok(Some(policy::DeclaredCost { kind, costs }))
 }
 
 /// Declaration-only report over FILEMAP's existing impact. No operations or resource measurement.
@@ -124,14 +144,14 @@ pub fn produce<D: ChangedFile>(
     serde_json::to_value(document(&entries, impact)).map_err(|e| e.to_string())
 }
 #[cfg(not(verus_keep_ghost))]
-type CostEntries = policy::Entries<Value, Value>;
+type CostEntries<'a> = policy::Entries<DeclaredCost<'a>, Value>;
 #[cfg(not(verus_keep_ghost))]
-type Declared = BTreeMap<String, Option<Value>>;
+type Declared<'a> = BTreeMap<String, Option<DeclaredCost<'a>>>;
 #[cfg(not(verus_keep_ghost))]
-fn document<'a, D>(
-    entries: &'a CostEntries,
+fn document<'a, 'r, D>(
+    entries: &'a CostEntries<'r>,
     impact: &'a FilemapImpact<D>,
-) -> policy::CostDocument<'a, Declared, Value> {
+) -> policy::CostDocument<'a, Declared<'r>, Value> {
     policy::document(
         &entries.before,
         &entries.after,
@@ -143,11 +163,11 @@ fn document<'a, D>(
 }
 
 #[cfg(not(verus_keep_ghost))]
-fn collect_costs<D: ChangedFile>(
-    base: &CostRegistry,
-    candidate: &CostRegistry,
+fn collect_costs<'a, D: ChangedFile>(
+    base: &'a CostRegistry,
+    candidate: &'a CostRegistry,
     impact: &FilemapImpact<D>,
-) -> Result<CostEntries, String> {
+) -> Result<CostEntries<'a>, String> {
     let subjects = verified_cost::cost_subjects(
         &impact.schema,
         &impact.delta,
@@ -164,22 +184,15 @@ fn collect_costs<D: ChangedFile>(
                 entry(endpoint, subject, kind, id)
             })?;
             let unknown = policy::ordered_sides(&a, &b, |endpoint, value| {
-                let members = value
-                    .as_ref()
-                    .and_then(|entry| entry["costs"].as_array())
-                    .map(Vec::as_slice);
                 policy::unknown_entries(
-                    members,
+                    value.as_ref(),
                     |cost| {
-                        let model = &cost["value"];
-                        policy::unknown_member(
+                        policy::model_unknown(
                             endpoint,
                             subject,
-                            &cost["member"],
-                            &cost["reference"],
-                            &cost["source"],
-                            &model["basis"],
-                            model_fields(|key| model[key].is_null()),
+                            cost,
+                            |model, key| model[key].is_null(),
+                            |model, key| &model[key],
                         )
                         .map(|entry| json!(entry))
                     },

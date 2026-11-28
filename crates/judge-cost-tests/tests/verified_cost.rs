@@ -57,6 +57,91 @@ fn each_model_key_reaches_its_own_coordinate() {
     expect(all.0 && all.1 && all.2 && all.3);
 }
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn unknown_reads_basis_and_coordinates_from_the_referenced_model() {
+    let value = 7u8;
+    let basis = 11u8;
+    let unrelated = 19u8;
+    let Ok(cost) = policy::model_reference(
+        Some(&value), "original", String::from_str("file:z"), "registry",
+        String::from_str("/cost_models/original"), String::from_str("/files/2/cost"),
+    ) else { expect(false); return; };
+    let missing = |observed: &u8, key: &'static str| -> (absent: bool)
+        ensures absent == (*observed == 7 && key@ == "wall_ms"@),
+    { *observed == 7 && <&str>::exec_eq(key, "wall_ms") };
+    let field = |observed: &u8, key: &'static str| -> (result: &u8)
+        ensures *result == if *observed == 7 && key@ == "basis"@ { 11u8 } else { 19u8 },
+    {
+        if *observed == 7 && <&str>::exec_eq(key, "basis") { &basis } else { &unrelated }
+    };
+    let unknown = policy::model_unknown(policy::Endpoint::Candidate, "project:p", &cost, missing, field)
+        .unwrap();
+    expect_name(unknown.endpoint, "candidate");
+    expect_name(unknown.node, "project:p");
+    expect_name(unknown.member.as_str(), "file:z");
+    expect_name(*unknown.reference, "original");
+    expect_name(unknown.source.pointer.as_str(), "/cost_models/original");
+    expect(*unknown.reason == 11);
+    proof {
+        let (cpu, wall, peak, io) = choose|cpu: bool, wall: bool, peak: bool, io: bool|
+            #[trigger] missing.ensures((cost.value, "cpu_ms"), cpu)
+            && #[trigger] missing.ensures((cost.value, "wall_ms"), wall)
+            && #[trigger] missing.ensures((cost.value, "peak_rss_bytes"), peak)
+            && #[trigger] missing.ensures((cost.value, "io_bytes"), io)
+            && unknown.coordinates.len() == policy::missing_names(cpu, wall, peak, io).len()
+            && forall|i: int| 0 <= i < unknown.coordinates.len() ==>
+                (#[trigger] unknown.coordinates@[i])@ == policy::missing_names(cpu, wall, peak, io)[i];
+        reveal_strlit("cpu_ms");
+        reveal_strlit("wall_ms");
+        reveal_strlit("peak_rss_bytes");
+        reveal_strlit("io_bytes");
+        assert(missing.ensures((cost.value, "cpu_ms"), cpu));
+        assert(missing.ensures((cost.value, "wall_ms"), wall));
+        assert(missing.ensures((cost.value, "peak_rss_bytes"), peak));
+        assert(missing.ensures((cost.value, "io_bytes"), io));
+        assert("cpu_ms"@[0] != "wall_ms"@[0]);
+        assert("peak_rss_bytes"@[0] != "wall_ms"@[0]);
+        assert("io_bytes"@[0] != "wall_ms"@[0]);
+        assert(!cpu && wall && !peak && !io);
+    }
+    expect(unknown.coordinates.len() == 1);
+    expect_name(unknown.coordinates[0], "wall_ms");
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn sort_keys_keep_original_rows_and_resolution_stops_at_the_first_missing_model() {
+    let files = [file("z", "p"), file("a", "p"), file("a", "p")];
+    let keys = policy::member_sort_keys(&files, &[0, 1, 2]);
+    expect(keys.len() == 3);
+    expect_name(keys[0].0, "z");
+    expect_name(keys[1].0, "a");
+    expect_name(keys[2].0, "a");
+    expect(keys[0].1 == 0 && keys[1].1 == 1 && keys[2].1 == 2);
+
+    // This literal is the external sort's expected output for those keys.
+    let ordered = [("a", 1usize), ("a", 2usize), ("z", 0usize)];
+    let resolve = |row: usize| -> (result: Result<usize, usize>)
+        ensures result == if row == 1 { Ok(row) } else { Err(row) },
+    { if row == 1 { Ok(row) } else { Err(row) } };
+    let result = policy::resolve_members(&ordered, resolve);
+    proof {
+        match result {
+            Err(error) => {
+                let prefix = choose|prefix: Seq<usize>| prefix.len() < ordered.len()
+                    && #[trigger] resolve.ensures((ordered@[prefix.len() as int].1,), Err(error))
+                    && policy::resolved_prefix(ordered@, resolve, prefix);
+                if prefix.len() == 2 {
+                    assert(resolve.ensures((ordered@[1].1,), Ok(prefix[1])));
+                }
+            },
+            Ok(ref values) => {
+                assert(resolve.ensures((ordered@[1].1,), Ok(values@[1])));
+            },
+        }
+    }
+    expect(matches!(result, Err(2)));
+}
+
 #[cfg_attr(not(verus_keep_ghost),test)]
 fn dispatch_and_pipeline_keep_native_tail_and_child_identity() {
     expect(policy::direct_report(Some("report-v1"),1));
@@ -90,8 +175,8 @@ fn copied_reports_keep_both_declarations_test_lists_original_sources_and_binding
     expect(*d.declared_before==4 && *d.declared_after==9);
     expect_name(d.affected_tests[0].as_str(),"new");expect_name(d.retired_tests[0].as_str(),"old");
     expect_name(d.schema,"chrono-costs/v1");expect(d.unknown.len()==1 && d.unknown[0]==1);
-    let r=policy::model_reference(Some(&b),"id","member","fm",String::from_str("/source"),String::from_str("/row")).unwrap();
-    expect_name(r.member,"member");expect_name(r.reference,"id");expect(*r.value==9);
+    let Ok(r)=policy::model_reference(Some(&b),"id",String::from_str("member"),"fm",String::from_str("/source"),String::from_str("/row")) else { expect(false); return; };
+    expect_name(r.member.as_str(),"member");expect_name(r.reference,"id");expect(*r.value==9);
     expect_name(r.source.pointer.as_str(),"/source");expect_name(r.declaration.pointer.as_str(),"/row");
     expect_name(r.source.registry,"fm");expect_name(r.declaration.registry,"fm");
 }
@@ -111,8 +196,9 @@ fn original_endpoint_order_and_memberless_state_are_distinct() {
     expect(both.len()==2 && both[0]==2 && both[1]==9);
     let visit=|a:&u8|->(item:Option<u8>) ensures item==Some(*a),{Some(*a)};
     let missing=||->(x:u8) ensures x==5, {5u8};
-    expect(policy::unknown_entries(None::<&[u8]>,visit,missing).len()==0);
-    let empty:[u8;0]=[];let one=policy::unknown_entries(Some(&empty),visit,missing);
+    expect(policy::unknown_entries(None::<&policy::DeclaredCost<u8>>,visit,missing).len()==0);
+    let empty=policy::DeclaredCost::<u8> { kind: "project", costs: Vec::new() };
+    let one=policy::unknown_entries(Some(&empty),visit,missing);
     expect(one.len()==1 && one[0]==5);
 }
 
@@ -450,4 +536,40 @@ fn a_diagnostic_write_preserves_the_selected_status() {
     );
     assert!(attempted);
     assert_eq!(cli::finish(0, None, |_| panic!("unexpected diagnostic")), 0);
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn report_preserves_the_first_missing_model_in_sorted_member_order() {
+    use serde_json::{Value, json};
+
+    let base: Value = serde_json::from_str(include_str!("fixtures/filemap-view.json")).unwrap();
+    let mut candidate = base.clone();
+    candidate["filemap"]["files"] = json!([
+        {"path":"z","owner":"p","cost":"first-registry-row"},
+        {"path":"a","owner":"p","cost":"declared"},
+        {"path":"a","owner":"p","cost":"first-missing"},
+        {"path":"a","owner":"p","cost":"later-duplicate"}
+    ]);
+    candidate["filemap"]["cost_models"]["declared"] = json!({});
+    let binding = json!({
+        "base":"base","candidate":"candidate","candidate_tree":"tree",
+        "registry_digest":"registry","context_digest":"context"
+    });
+    let impact = json!({
+        "schema":"chrono-filemap-impact/v6","delta":[],"reached":["project:p"],
+        "required_tests":[],"tests":[],"retired_tests":[]
+    });
+    let input = json!({"base":base,"candidate":candidate,"impact":impact,"binding":binding});
+    let mut output = Vec::new();
+    let error = chrono_judge_cost::report::write_report(
+        &serde_json::to_vec(&input).unwrap()[..],
+        &mut output,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "E_COST_REFERENCE: missing cost model first-missing for file:a"
+    );
+    assert!(output.is_empty());
 }

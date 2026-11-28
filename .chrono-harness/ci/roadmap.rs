@@ -5,6 +5,16 @@ use verus_builtin_macros::verus;
 use vstd::prelude::*;
 
 verus! {
+pub fn deployed_tool_installer() -> (source: &'static str) {
+    include_str!("../install-tools.sh")
+}
+
+pub fn installer_digest_matches(digest: &String) -> (accepted: bool)
+    ensures accepted == (digest@ == "39566b5b467e31e09edb73ffc0c79b6c719ef0f59b684df9c165bfb66048af47"@),
+{
+    *digest == "39566b5b467e31e09edb73ffc0c79b6c719ef0f59b684df9c165bfb66048af47".to_string()
+}
+
 /// Both deployed files are inputs to this proof compilation and its native test.
 pub fn deployed_roadmap() -> (&'static str, &'static str) {
     (include_str!("../../.github/roadmap.cjs"), include_str!("../../.github/workflows/issue-roadmap.yml"))
@@ -22,9 +32,9 @@ pub fn roadmap_repository(checkout: bool, owner_id: u64, repo_id: u64) -> (accep
 }
 /// The native caller hashes the actual UTF-8 bytes embedded above.
 pub fn roadmap_matches(script: &String, workflow: &String) -> (accepted: bool)
-    ensures accepted == (script@ == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9"@ && workflow@ == "084f40b32452b36eed8ad1651bd32fd6d4584cb8e63fa3a25a7eadffcfc78209"@),
+    ensures accepted == (script@ == "86e97ab0ed63be36d37d32e7d164da4e226c6f616685ad4ce1dd75f814095f8a"@ && workflow@ == "a96441312ef65ef562263e22bdb3e0afa2f2af2b3c0a1d6f4efcce07d3c5d62f"@),
 {
-    *script == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9".to_string() && *workflow == "084f40b32452b36eed8ad1651bd32fd6d4584cb8e63fa3a25a7eadffcfc78209".to_string()
+    *script == "86e97ab0ed63be36d37d32e7d164da4e226c6f616685ad4ce1dd75f814095f8a".to_string() && *workflow == "a96441312ef65ef562263e22bdb3e0afa2f2af2b3c0a1d6f4efcce07d3c5d62f".to_string()
 }
 }
 
@@ -39,6 +49,15 @@ mod native {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect()
+    }
+
+    #[test]
+    fn deployed_tool_installer_matches_the_selected_template() {
+        let digest = roadmap_digest(deployed_tool_installer());
+        assert!(
+            installer_digest_matches(&digest),
+            "install-tools.sh differs from the selected template"
+        );
     }
 
     fn locked_roadmap_reference<'a>(
